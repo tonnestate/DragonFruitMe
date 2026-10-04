@@ -211,7 +211,7 @@ The Skill lives at `src/dragonfruitme/SKILL.md` (packaged) with byte-identical m
 
 ## Relationship to the other fruits
 
-DragonFruitMe is independent and runs on its own. In the TonnEstate ecosystem it is the **sensory organ for the web**: PlumMe can supply it as a capability, CherryMe and AVCOS can consume its grounded field evidence, MangoMe can persist the recipe store's decisions, and BananaMe's design — small surface, fail-closed, machine-readable evidence — is its template.
+DragonFruitMe is independent and runs on its own.
 
 ## Donors and prior art
 

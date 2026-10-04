@@ -64,6 +64,10 @@ def test_extract_batch_deduplicates_flushes_and_continues(tmp_path, monkeypatch,
         "errors": 1,
         "unconfirmed_fields": 0,
         "flagged_rows": 0,
+        "error_codes": {"FETCH_FAILED": 1},
+        "field_statuses": {"FOUND": 2},
+        "stage_hits": {},
+        "signals": {},
     }
 
 
@@ -191,3 +195,39 @@ def test_extract_batch_end_to_end_reuses_recipes_across_urls(tmp_path, site, cap
     assert first["stage"] == "label" and first["normalized"] == 349000.0
     assert second["stage"] == "recipe" and second["normalized"] == 1250000.0
     capsys.readouterr()
+
+
+def test_extract_batch_aggregates_failure_and_stage_telemetry(tmp_path, monkeypatch, capsys):
+    urls = tmp_path / "urls.txt"
+    urls.write_text("https://example.org/a\nhttps://bad.example/x\n", encoding="utf-8")
+
+    class TelemetryTool:
+        def extract(self, *, fields, url, render, learn):
+            if "bad" in url:
+                return {"ok": False, "error": {"code": "HTTP_ERROR", "recoverable": True}}
+            return {
+                "ok": True,
+                "status": "PARTIAL",
+                "fields": [
+                    {"name": "phone", "status": "FOUND", "stage": "recipe", "signals": []},
+                    {"name": "email", "status": "UNCONFIRMED", "stage": "label",
+                     "signals": [{"code": "STAGE_DISAGREEMENT"}]},
+                    {"name": "city", "status": "NEEDS_AGENT", "signals": []},
+                ],
+            }
+
+    monkeypatch.setattr(cli, "DragonFruitMe", lambda **kwargs: TelemetryTool())
+    with pytest.raises(SystemExit):
+        cli.main([
+            "extract-batch",
+            "--urls-file", str(urls),
+            "--fields-json", '[{"name":"phone"},{"name":"email"},{"name":"city"}]',
+            "--render", "never",
+        ])
+
+    captured = capsys.readouterr()
+    summary = json.loads(captured.err)["batch"]
+    assert summary["error_codes"] == {"HTTP_ERROR": 1}
+    assert summary["field_statuses"] == {"FOUND": 1, "UNCONFIRMED": 1, "NEEDS_AGENT": 1}
+    assert summary["stage_hits"] == {"recipe": 1, "label": 1}
+    assert summary["signals"] == {"STAGE_DISAGREEMENT": 1}

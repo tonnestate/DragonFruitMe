@@ -141,7 +141,11 @@ def _structural_value_blocks(
         if candidate.region != label_block.region or candidate.section != label_block.section:
             continue
         shared = _shared_ancestry(label_block, candidate)
-        if shared == 0:
+        # Require the two blocks to diverge only at (roughly) their immediate
+        # wrapper. This admits sibling component wrappers but prevents a label
+        # in one card from stealing a typed value from the next card.
+        required_shared = max(1, min(len(label_block.ancestry), len(candidate.ancestry)) - 1)
+        if shared < required_shared:
             continue
         # A short block that itself looks like one of our labels is not a value.
         if len(candidate.text) <= LABEL_MAX_CHARS and any(p.search(candidate.text) for p in patterns):

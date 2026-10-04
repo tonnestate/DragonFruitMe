@@ -26,7 +26,8 @@ mcp = MCPServer(
         "heuristics -> optional rendering -> NEEDS_AGENT with bounded candidates. If a field comes back "
         "NEEDS_AGENT and you can read the value in the candidates, call extract again with that field's "
         "'teach' set to the exact value; it is accepted only if it is grounded in the page, and it is "
-        "compiled into a recipe. BLOCKED and ROBOTS_DISALLOWED are final: DragonFruitMe never bypasses "
+        "compiled into a recipe. Every found value carries a provenance (AGENT_TAUGHT < ENGINE_OBSERVED < "
+        "CROSS_CONFIRMED) and signals; set min_provenance on fields that matter. BLOCKED and ROBOTS_DISALLOWED are final: DragonFruitMe never bypasses "
         "CAPTCHAs, bot challenges or robots.txt - use an official API/feed or ask a human."
     ),
     version=__version__,
@@ -49,7 +50,7 @@ def locate(query: str, url: str | None = None, html: str | None = None, base_url
 @mcp.tool()
 def extract(fields: list[dict[str, Any]], url: str | None = None, html: str | None = None,
             base_url: str | None = None, render: str = "auto") -> dict[str, Any]:
-    """Extract typed fields through the escalation graph. Field: {name, type, aliases?, paths?, min?, max?, pattern?, teach?}."""
+    """Extract typed fields through the escalation graph. Field: {name, type, aliases?, paths?, min?, max?, pattern?, teach?, min_provenance?}."""
     return _tool.extract(fields=fields, url=url, html=html, base_url=base_url, render=render)
 
 

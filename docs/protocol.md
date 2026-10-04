@@ -32,7 +32,8 @@ Field spec:
   "min": 1000,
   "max": 50000000,
   "pattern": null,
-  "teach": null
+  "teach": null,
+  "min_provenance": null
 }
 ```
 
@@ -40,7 +41,18 @@ A bare string is shorthand for `{"name": "...", "type": "text"}`.
 
 Types: `text, price, area, number, integer, date, email, phone, url`.
 
-Field result: `name, type, status, value, normalized, stage, page_stage, evidence, recipe, attempts[]`; `NEEDS_AGENT` adds `candidates[]` and `next`.
+Field result: `name, type, status, value, normalized, stage, page_stage, evidence, recipe, provenance, confirmed_by[], signals[], attempts[]`; `UNCONFIRMED` adds `required_provenance`; `NEEDS_AGENT` adds `candidates[]` and `next`.
+
+Field status: `FOUND`, `UNCONFIRMED` (value below `min_provenance`), `NEEDS_AGENT`, `NOT_GROUNDED`.
+
+Provenance: `AGENT_TAUGHT` < `ENGINE_OBSERVED` < `CROSS_CONFIRMED`. `min_provenance` accepts these names case-insensitively.
+
+Signals:
+
+| code | meaning |
+|---|---|
+| `STAGE_DISAGREEMENT` | an independent stage answered differently (`disagreements[]: {stage, value}`), but the value was kept |
+| `REPEATED_VALUE` | the same unconfirmed value on `urls` ≥ 3 different consecutive URLs of the scope |
 
 Call result: `status (COMPLETE | PARTIAL | INCOMPLETE), scope, fields[], pages[], found, total`.
 
@@ -53,7 +65,7 @@ dragonfruitme extract-batch --urls-file FILE --fields-json JSON [--output OUT.js
 
 * Input: one URL per line (`#` comments allowed) or a JSON array; duplicates are removed, order is kept.
 * Output: one JSONL row per URL, `{"url": ..., <extract result>}`, flushed immediately; stdout if `--output` is omitted.
-* Summary on stderr: `{"ok": true, "batch": {total, skipped, attempted, complete, partial, incomplete, errors}}`.
+* Summary on stderr: `{"ok": true, "batch": {total, skipped, attempted, complete, partial, incomplete, errors, unconfirmed_fields, flagged_rows}}`; `flagged_rows` counts rows with at least one field signal.
 * `--resume` (requires `--output`): repairs a torn last line, skips URLs whose latest row is final (`ok: true` or `error.recoverable: false`), retries the rest. The latest row per URL is authoritative.
 * Exit code 0 unless `--fail-on-error` is set and at least one URL failed (then 2).
 
@@ -61,7 +73,7 @@ dragonfruitme extract-batch --urls-file FILE --fields-json JSON [--output OUT.js
 
 | stage | outcomes |
 |---|---|
-| `recipe` | `SKIP` (`NO_RECIPE`), `HIT`, `MISS` (+ validation reason, `recipe_status`) |
+| `recipe` | `SKIP` (`NO_RECIPE`), `HIT`, `MISS` (+ validation reason or `CONTRADICTED` with `recipe_value`, `contradicted_by[]`, and `recipe_status`) |
 | `structured` | `HIT`, `MISS` (`NO_CANDIDATE`, `NO_VALID_CANDIDATE`) |
 | `label` | `HIT`, `MISS` (`NO_LABEL`, `NO_VALID_CANDIDATE`) |
 | `render` | `RENDERED`, `SKIP` (`PAGE_NOT_JS_SHELL`, `NO_URL_OR_RENDERER`, `RENDER_NEVER`), `UNAVAILABLE`, `FAILED` |

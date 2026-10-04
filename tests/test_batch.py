@@ -62,6 +62,8 @@ def test_extract_batch_deduplicates_flushes_and_continues(tmp_path, monkeypatch,
         "partial": 0,
         "incomplete": 0,
         "errors": 1,
+        "unconfirmed_fields": 0,
+        "flagged_rows": 0,
     }
 
 

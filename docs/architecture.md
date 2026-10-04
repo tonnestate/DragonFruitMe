@@ -78,19 +78,36 @@ Render policy: `auto` renders only if a field is unresolved **and** the page is 
 * **Regex derivation:** find the value in raw HTML (whitespace/entity-tolerant). First try an anchor that starts at the nearest preceding occurrence of the visible label (≤300 chars before). Otherwise try markup anchors of increasing length (16…160 chars), snapped to a tag start. Whitespace becomes `\s*`, digit runs ≥3 become `\d+` (ids change per page). The capture group is **typed** (`price`, `area`, …) or a text node (`[^<]+?` up to `<` or the literal delimiter that followed the value). A candidate is accepted only if its first match equals the value and all matches agree.
 * **Lifecycle:** hit → `hits+1, misses=0, active`; miss → `misses+1`, `stale` after 2 misses; any later hit in stages 2–5 overwrites the recipe (self-healing).
 
-## 6. Invariants
+## 6. Assurance: provenance, contradiction, repetition
+
+After a stage finds a value, the structured and label stages are asked **independently** about it on the same page:
+
+* `confirmed_by` = engine stages with at least one valid candidate equal to the value;
+* a stage *disagrees* when it has a valid answer of its own and none of its candidates equals the value.
+
+**Provenance** (lowest to highest): `AGENT_TAUGHT` (origin taught, no engine confirmation) < `ENGINE_OBSERVED` (one engine stage confirms, or an engine-derived recipe hit without contradiction) < `CROSS_CONFIRMED` (structured and label both confirm). An agent cannot raise the provenance of its own claim. `min_provenance` turns lower values into `UNCONFIRMED` (value shown, not counted as found).
+
+**Contradiction:** a `regex`/`label` recipe derived from the label or structured stage is discarded when nothing confirms it and an independent stage disagrees. The attempt is recorded as `MISS` with reason `CONTRADICTED`, `recipe_value` and `contradicted_by`; the field escalates and the recipe is relearned. Disagreement that does not discard a hit is reported as a `STAGE_DISAGREEMENT` signal.
+
+**Repetition:** the store remembers, per scope and field, the last URL, the last value and how many *different* consecutive URLs produced that value. From `REPEAT_THRESHOLD` = 3 URLs on, an **unconfirmed** value carries a `REPEATED_VALUE` signal. Re-extracting the same URL does not count, and confirmed constants (an agency e-mail with its label) are never flagged.
+
+**Evidence:** `scripts/scenario_matrix.py` drives the engine through 7 pathologies and 6 false-positive controls and renders `docs/EVIDENCE.md`; the test suite fails if a scenario fails or the file is stale. Disabling the independent check makes one pathology and two controls fail, so the matrix measures the mechanism rather than restating it.
+
+## 7. Invariants
 
 1. No stage may return a value that fails type validation.
 2. No taught value is accepted unless it occurs in the page.
-3. Every field result carries the full `attempts` path; nothing is reported as found without `stage` and `evidence`.
-4. Blocks, robots disallows and rate limits are final for the call.
-5. The agent can neither choose the filesystem location of the recipe store nor relax the fetch policy.
-6. The core imports only the Python standard library.
+3. Every field result carries the full `attempts` path; nothing is reported as found without `stage`, `evidence` and `provenance`.
+4. A recipe hit that an independent stage contradicts is never returned as found.
+5. Blocks, robots disallows and rate limits are final for the call.
+6. The agent can neither choose the filesystem location of the recipe store nor relax the fetch policy.
+7. The core imports only the Python standard library.
 
-## 7. Deferred (not in v0.1)
+## 8. Deferred
 
 * CSS/XPath recipe kind and DOM-path anchors next to regex anchors.
 * Multi-value fields (lists, tables → rows).
-* Recipe confidence across many pages of a scope; A/B validation before overwriting an active recipe.
+* Recipe history with fallback to the last good recipe; A/B validation before overwriting an active recipe.
+* JSON Schemas for field specs and results with contract tests.
 * Optional HTTP clients (HTTP/2) as an extra stage between `http` and `render`.
 * Off-page SEO providers (PageSpeed Insights, CrUX, Search Console, OpenRush) as optional plugins.

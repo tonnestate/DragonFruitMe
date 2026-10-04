@@ -77,6 +77,19 @@ class RecipeStore:
                 )
                 """
             )
+            db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS observations (
+                    scope TEXT NOT NULL,
+                    field TEXT NOT NULL,
+                    last_url TEXT NOT NULL,
+                    last_value TEXT NOT NULL,
+                    streak INTEGER NOT NULL DEFAULT 1,
+                    updated_at REAL NOT NULL,
+                    PRIMARY KEY (scope, field)
+                )
+                """
+            )
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
@@ -126,6 +139,36 @@ class RecipeStore:
             row = db.execute("SELECT status FROM recipes WHERE scope=? AND field=?", (scope, field)).fetchone()
         return row[0] if row else "missing"
 
+    def observe(self, scope: str, field: str, url: str, value: str) -> int:
+        """Record a found value and return how many *different* consecutive URLs
+        of this scope produced exactly this value (1 = first time).
+
+        Re-extracting the same URL does not count as repetition.
+        """
+        with self._connect() as db:
+            row = db.execute(
+                "SELECT last_url, last_value, streak FROM observations WHERE scope=? AND field=?", (scope, field)
+            ).fetchone()
+            if row is None:
+                streak = 1
+            elif row[0] == url:
+                streak = row[2] if row[1] == value else 1
+            elif row[1] == value:
+                streak = row[2] + 1
+            else:
+                streak = 1
+            db.execute(
+                """
+                INSERT INTO observations (scope, field, last_url, last_value, streak, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(scope, field) DO UPDATE SET
+                    last_url=excluded.last_url, last_value=excluded.last_value,
+                    streak=excluded.streak, updated_at=excluded.updated_at
+                """,
+                (scope, field, url, value, streak, time.time()),
+            )
+        return streak
+
     def list(self, scope: str | None = None) -> list[Recipe]:
         query = "SELECT scope, field, kind, pattern, origin, hits, misses, status FROM recipes"
         args: tuple[Any, ...] = ()
@@ -140,8 +183,10 @@ class RecipeStore:
         with self._connect() as db:
             if field is None:
                 cur = db.execute("DELETE FROM recipes WHERE scope=?", (scope,))
+                db.execute("DELETE FROM observations WHERE scope=?", (scope,))
             else:
                 cur = db.execute("DELETE FROM recipes WHERE scope=? AND field=?", (scope, field))
+                db.execute("DELETE FROM observations WHERE scope=? AND field=?", (scope, field))
             return cur.rowcount
 
 

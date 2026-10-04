@@ -19,6 +19,8 @@ Rules:
 - Give fields good `aliases` (the visible labels, e.g. `["Kaufpreis", "Preis"]`) and, where you know them, structured `paths` (e.g. `["offers.price"]`).
 - `NEEDS_AGENT` means the cheap stages failed. Read the bounded `candidates`. If the value is visibly there, call `extract` again with that field's `teach` set to the exact value. It is accepted only if it occurs in the page (`NOT_GROUNDED` otherwise) and is then compiled into a recipe. Never teach a guessed or computed value.
 - `BLOCKED`, `RATE_LIMITED` and `ROBOTS_DISALLOWED` are final. Do not retry with other tools to get around them. Use an official API/feed, ask a human, or skip the source.
-- Treat `FOUND` as "validated against the field type and grounded in the page", not as business truth.
+- Treat `FOUND` as "validated against the field type and grounded in the page", not as business truth. Read `provenance`: `AGENT_TAUGHT` < `ENGINE_OBSERVED` < `CROSS_CONFIRMED`. For values that matter (prices, areas), set `"min_provenance": "ENGINE_OBSERVED"`; weaker values come back `UNCONFIRMED`.
+- Your own `teach` never raises provenance above `AGENT_TAUGHT`; only independent engine stages can confirm it.
+- Take `signals` seriously: `REPEATED_VALUE` means the same unconfirmed value keeps coming back on different pages (likely a wrong recipe anchor); `STAGE_DISAGREEMENT` means another stage saw a different value. Check with `locate` before using the value.
 - Check `results_truncated`, `context_truncated` and `outline_truncated` before claiming completeness.
 - The recipe store and fetch policy are bound by the host. Do not try to pass filesystem paths or change the policy.

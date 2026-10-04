@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.0 — 2026-10-04
+
+Extraction assurance: a found value now says who stands behind it, and a recipe hit is no longer trusted blindly.
+
+- provenance per field: `AGENT_TAUGHT` < `ENGINE_OBSERVED` < `CROSS_CONFIRMED`, with `confirmed_by`; an agent cannot raise the provenance of its own taught value;
+- optional `min_provenance` per field; weaker values return `UNCONFIRMED` (value visible, not counted as found);
+- independent check of every found value against the structured and label stages on the same page;
+- contradicted recipes: a label-derived regex/label recipe whose answer no stage confirms while an independent stage disagrees is discarded (`MISS`, reason `CONTRADICTED`, with `recipe_value` and `contradicted_by`), the field escalates and the recipe is relearned;
+- signals per field: `STAGE_DISAGREEMENT` and `REPEATED_VALUE` (same unconfirmed value on ≥ 3 different consecutive URLs of a scope); confirmed constants and re-extraction of the same URL are never flagged;
+- recipe store keeps a small per-scope/field observation record for repetition tracking (new `observations` table, created automatically);
+- `extract-batch` summary adds `unconfirmed_fields` and `flagged_rows`;
+- `scripts/scenario_matrix.py` drives the real engine through 7 pathologies and 6 false-positive controls and renders `docs/EVIDENCE.md`; the test suite fails if a scenario fails or the file is stale;
+- Skill, README, architecture and protocol documentation updated; 57 tests.
+
 ## 0.1.2 — 2026-10-04
 
 Batch robustness and recipe stability.

@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "dragonfruitme",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "Escalating web-to-graph extraction for AI agents: observe, locate, extract - cheapest-first with compile-once recipes.",
   "author": {
     "name": "TonnEstate"

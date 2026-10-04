@@ -109,6 +109,8 @@ def _batch_extract(args: argparse.Namespace, tool: DragonFruitMe) -> int:
         "partial": 0,
         "incomplete": 0,
         "errors": 0,
+        "unconfirmed_fields": 0,
+        "flagged_rows": 0,
     }
 
     try:
@@ -135,6 +137,10 @@ def _batch_extract(args: argparse.Namespace, tool: DragonFruitMe) -> int:
                 counts[status] += 1
             else:
                 counts["errors"] += 1
+            fields = result.get("fields") or []
+            counts["unconfirmed_fields"] += sum(1 for f in fields if f.get("status") == "UNCONFIRMED")
+            if any(f.get("signals") for f in fields):
+                counts["flagged_rows"] += 1
     finally:
         if close_stream:
             stream.close()

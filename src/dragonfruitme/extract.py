@@ -22,10 +22,18 @@ from .errors import DragonFruitMeError
 from .graph import Block, PageGraph, build_graph
 from .locate import locate
 from .recipes import Recipe, RecipeStore, apply_regex, derive_regex
-from .values import FIELD_TYPES, find_typed, fold, normalize_text, validate, value_regex
+from .values import FIELD_TYPES, equivalent, find_typed, fold, normalize_text, validate, value_regex
 
 LABEL_MAX_CHARS = 60
 RENDER_MODES = {"auto", "on_miss", "never"}
+
+# Who stands behind a value (lowest to highest). An agent can never raise the
+# provenance of its own claim: only independent engine stages can.
+PROVENANCE = ("AGENT_TAUGHT", "ENGINE_OBSERVED", "CROSS_CONFIRMED")
+# The same unconfirmed value on this many different URLs of one scope is a
+# signal that a recipe is anchored on something page-independent (a sidebar,
+# a teaser, a default) - activity that is not progress.
+REPEAT_THRESHOLD = 3
 
 
 @dataclass
@@ -57,6 +65,16 @@ def normalize_spec(raw: Any) -> dict[str, Any]:
     spec["aliases"] = list(dict.fromkeys(n.strip() for n in names if str(n).strip()))
     paths = spec.get("paths") or []
     spec["paths"] = [paths] if isinstance(paths, str) else list(paths)
+    minimum = spec.get("min_provenance")
+    if minimum is not None:
+        minimum = str(minimum).strip().upper()
+        if minimum not in PROVENANCE:
+            raise DragonFruitMeError(
+                "FIELD_INVALID",
+                f"Unknown min_provenance '{spec['min_provenance']}'.",
+                details={"field": spec["name"], "allowed": list(PROVENANCE)},
+            )
+        spec["min_provenance"] = minimum
     return spec
 
 
@@ -122,6 +140,54 @@ def label_candidates(graph: PageGraph, labels: list[str], field_type: str) -> It
     yield from inline
 
 
+# -- independent confirmation ----------------------------------------------------
+
+def _stage_view(candidates: Iterator[tuple[str, Any]], spec: dict[str, Any], value: str,
+                typed_source: bool) -> tuple[bool, str | None]:
+    """Return (agrees, primary) for one engine stage: does any valid candidate
+    equal ``value``, and what would the stage itself have answered?"""
+    primary = None
+    for raw, _ in candidates:
+        ok, _, _ = validate(raw, spec, typed_source=typed_source)
+        if not ok:
+            continue
+        if primary is None:
+            primary = normalize_text(raw)
+        if equivalent(raw, value, spec["type"]):
+            return True, primary
+    return False, primary
+
+
+def independent_check(page: Page, spec: dict[str, Any], value: str) -> tuple[list[str], list[dict[str, Any]]]:
+    """Ask the structured and label stages independently about ``value``.
+
+    Returns ``(confirmed_by, disagreements)``. A stage disagrees when it has a
+    valid answer of its own and none of its candidates equals ``value``.
+    """
+    confirmed: list[str] = []
+    disagreements: list[dict[str, Any]] = []
+    views = {
+        "structured": _stage_view(((raw, path) for _, path, raw in structured.candidates(page.graph, spec)),
+                                  spec, value, typed_source=True),
+        "label": _stage_view(((raw, label) for raw, label, _ in label_candidates(page.graph, spec["aliases"], spec["type"])),
+                             spec, value, typed_source=False),
+    }
+    for stage, (agrees, primary) in views.items():
+        if agrees:
+            confirmed.append(stage)
+        elif primary is not None:
+            disagreements.append({"stage": stage, "value": primary})
+    return confirmed, disagreements
+
+
+def provenance_of(origin: str, confirmed: list[str]) -> str:
+    if len(confirmed) >= 2:
+        return "CROSS_CONFIRMED"
+    if confirmed:
+        return "ENGINE_OBSERVED"
+    return "AGENT_TAUGHT" if origin == "taught" else "ENGINE_OBSERVED"
+
+
 # -- the graph ----------------------------------------------------------------
 
 class Extractor:
@@ -167,15 +233,31 @@ class Extractor:
         else:
             raw, evidence = self._apply_recipe(recipe, page, spec)
             ok, normalized, reason = validate(raw, spec) if raw else (False, None, "NO_MATCH")
-            if ok:
+            check = independent_check(page, spec, raw) if ok else ([], [])
+            contradicted = (
+                ok
+                and recipe.kind in {"regex", "label"}
+                and recipe.origin in {"label", "structured"}
+                and not check[0]
+                and bool(check[1])
+            )
+            if ok and not contradicted:
                 self.store.record(scope, name, True)
                 attempts.append({"stage": "recipe", "page": page.stage, "outcome": "HIT", "kind": recipe.kind})
-                return self._found(spec, raw, normalized, "recipe", page,
-                                   {"recipe_kind": recipe.kind, **evidence},
-                                   {"kind": recipe.kind, "pattern": recipe.pattern, "scope": scope, "compiled": False})
+                found = self._found(spec, raw, normalized, "recipe", page,
+                                    {"recipe_kind": recipe.kind, **evidence},
+                                    {"kind": recipe.kind, "pattern": recipe.pattern, "scope": scope, "compiled": False})
+                return self._assess(scope, spec, page, found, recipe.origin, check)
+            if contradicted:
+                reason = "CONTRADICTED"
             status = self.store.record(scope, name, False)
-            attempts.append({"stage": "recipe", "page": page.stage, "outcome": "MISS", "reason": reason,
-                             "kind": recipe.kind, "recipe_status": status})
+            miss = {"stage": "recipe", "page": page.stage, "outcome": "MISS", "reason": reason,
+                    "kind": recipe.kind, "recipe_status": status}
+            if contradicted:
+                # the recipe answered, but an independent stage on this page says otherwise
+                miss["recipe_value"] = normalize_text(raw)
+                miss["contradicted_by"] = check[1]
+            attempts.append(miss)
         # 2 structured
         seen = 0
         for source, path, raw in structured.candidates(page.graph, spec):
@@ -185,7 +267,8 @@ class Extractor:
                 kind = source.split("[", 1)[0]
                 attempts.append({"stage": "structured", "page": page.stage, "outcome": "HIT", "source": kind})
                 compiled = self._compile(scope, spec, page, raw, "structured", json_path=f"{kind}|{path}") if learn else None
-                return self._found(spec, raw, normalized, "structured", page, {"source": kind, "path": path}, compiled)
+                found = self._found(spec, raw, normalized, "structured", page, {"source": kind, "path": path}, compiled)
+                return self._assess(scope, spec, page, found, "structured")
         attempts.append({"stage": "structured", "page": page.stage, "outcome": "MISS",
                          "reason": "NO_VALID_CANDIDATE" if seen else "NO_CANDIDATE", "candidates_checked": seen})
         # 3 label
@@ -196,7 +279,8 @@ class Extractor:
             if ok:
                 attempts.append({"stage": "label", "page": page.stage, "outcome": "HIT", "label": label})
                 compiled = self._compile(scope, spec, page, raw, "label", label=label) if learn else None
-                return self._found(spec, raw, normalized, "label", page, {"label": label, "block_id": block_id}, compiled)
+                found = self._found(spec, raw, normalized, "label", page, {"label": label, "block_id": block_id}, compiled)
+                return self._assess(scope, spec, page, found, "label")
         attempts.append({"stage": "label", "page": page.stage, "outcome": "MISS",
                          "reason": "NO_VALID_CANDIDATE" if seen else "NO_LABEL", "candidates_checked": seen})
         return None
@@ -238,8 +322,32 @@ class Extractor:
         compiled = self._compile(scope, spec, page, taught, "taught", json_path=json_path, label=label)
         attempts.append({"stage": "taught", "page": page.stage, "outcome": "GROUNDED",
                          "recipe": compiled["kind"] if compiled else None})
-        return self._found(spec, taught, normalized, "taught", page,
-                           {"grounded_in": "structured" if json_path else "html"}, compiled, attempts)
+        found = self._found(spec, taught, normalized, "taught", page,
+                            {"grounded_in": "structured" if json_path else "html"}, compiled, attempts)
+        return self._assess(scope, spec, page, found, "taught")
+
+    def _assess(self, scope: str, spec: dict[str, Any], page: Page, found: dict[str, Any], origin: str,
+                check: tuple[list[str], list[dict[str, Any]]] | None = None) -> dict[str, Any]:
+        """Attach provenance and signals; enforce ``min_provenance``."""
+        confirmed, disagreements = check if check is not None else independent_check(page, spec, found["value"])
+        provenance = provenance_of(origin, confirmed)
+        signals: list[dict[str, Any]] = []
+        if disagreements:
+            signals.append({"code": "STAGE_DISAGREEMENT", "disagreements": disagreements})
+        url = page.info.get("final_url") or page.info.get("url") or ""
+        if url and scope != "inline":
+            streak = self.store.observe(scope, spec["name"], url, str(found["normalized"]))
+            if streak >= REPEAT_THRESHOLD and not confirmed:
+                signals.append({"code": "REPEATED_VALUE", "urls": streak,
+                                "hint": "same unconfirmed value on several different pages; check the recipe anchor"})
+        found["provenance"] = provenance
+        found["confirmed_by"] = confirmed
+        found["signals"] = signals
+        minimum = spec.get("min_provenance")
+        if minimum and PROVENANCE.index(provenance) < PROVENANCE.index(minimum):
+            found["status"] = "UNCONFIRMED"
+            found["required_provenance"] = minimum
+        return found
 
     # -- result shapes -------------------------------------------------------
     @staticmethod

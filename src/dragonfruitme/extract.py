@@ -25,6 +25,7 @@ from .recipes import Recipe, RecipeStore, apply_regex, derive_regex
 from .values import FIELD_TYPES, equivalent, find_typed, fold, normalize_text, validate, value_regex
 
 LABEL_MAX_CHARS = 60
+STRUCTURAL_LOOKAHEAD = 8
 RENDER_MODES = {"auto", "on_miss", "never"}
 
 # Who stands behind a value (lowest to highest). An agent can never raise the
@@ -108,6 +109,52 @@ def _next_value_block(graph: PageGraph, block: Block) -> Block | None:
     return nxt if nxt.section == block.section else None
 
 
+def _shared_ancestry(left: Block, right: Block) -> int:
+    """Number of identical structural container nodes from the document root."""
+    shared = 0
+    for a, b in zip(left.ancestry, right.ancestry):
+        if a != b:
+            break
+        shared += 1
+    return shared
+
+
+def _structural_value_blocks(
+    graph: PageGraph,
+    label_block: Block,
+    patterns: list[re.Pattern[str]],
+    field_type: str,
+) -> Iterator[Block]:
+    """Yield nearby value blocks in the same bounded DOM neighbourhood.
+
+    Modern component/CSS layouts often put a label and its value in sibling
+    wrappers with decorative/help blocks in between. Adjacency alone misses
+    those layouts. We therefore inspect only the next few blocks and require a
+    shared structural ancestor, same section and same page region. Typed
+    validation still decides whether a candidate can count.
+    """
+    ranked: list[tuple[int, int, Block]] = []
+    upper = min(len(graph.blocks), label_block.id + STRUCTURAL_LOOKAHEAD + 1)
+    for candidate in graph.blocks[label_block.id + 1:upper]:
+        if candidate.heading_level is not None:
+            continue
+        if candidate.region != label_block.region or candidate.section != label_block.section:
+            continue
+        shared = _shared_ancestry(label_block, candidate)
+        if shared == 0:
+            continue
+        # A short block that itself looks like one of our labels is not a value.
+        if len(candidate.text) <= LABEL_MAX_CHARS and any(p.search(candidate.text) for p in patterns):
+            continue
+        if _value_from(candidate.text, field_type) is None:
+            continue
+        distance = candidate.id - label_block.id
+        ranked.append((shared, -distance, candidate))
+    ranked.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    for _, _, candidate in ranked:
+        yield candidate
+
+
 def label_candidates(graph: PageGraph, labels: list[str], field_type: str) -> Iterator[tuple[str, str, int]]:
     """Yield ``(raw_value, label_text, block_id)``: main region first, exact labels first."""
     patterns = [_alias_regex(a) for a in labels if a.strip()]
@@ -115,7 +162,9 @@ def label_candidates(graph: PageGraph, labels: list[str], field_type: str) -> It
         return
     ordered = sorted(graph.blocks, key=lambda b: (b.region != "main", b.id))
     exact: list[tuple[str, str, int]] = []
+    structural: list[tuple[str, str, int]] = []
     inline: list[tuple[str, str, int]] = []
+    structural_seen: set[tuple[int, int]] = set()
     for block in ordered:
         if block.heading_level is not None and len(block.text) > LABEL_MAX_CHARS:
             continue
@@ -131,12 +180,21 @@ def label_candidates(graph: PageGraph, labels: list[str], field_type: str) -> It
                     value = _value_from(nxt.text, field_type)
                     if value:
                         exact.append((value, block.text.rstrip(": "), nxt.id))
+                        structural_seen.add((block.id, nxt.id))
+                for candidate in _structural_value_blocks(graph, block, patterns, field_type):
+                    if (block.id, candidate.id) in structural_seen:
+                        continue
+                    value = _value_from(candidate.text, field_type)
+                    if value:
+                        structural.append((value, block.text.rstrip(": "), candidate.id))
+                        structural_seen.add((block.id, candidate.id))
             else:
                 value = _value_from(rest, field_type)
                 if value:
                     inline.append((value, match.group(0), block.id))
             break
     yield from exact
+    yield from structural
     yield from inline
 
 

@@ -166,12 +166,20 @@ def label_candidates(graph: PageGraph, labels: list[str], field_type: str) -> It
         return
     ordered = sorted(graph.blocks, key=lambda b: (b.region != "main", b.id))
     exact: list[tuple[str, str, int]] = []
+    attributed: list[tuple[str, str, int]] = []
     structural: list[tuple[str, str, int]] = []
     inline: list[tuple[str, str, int]] = []
     structural_seen: set[tuple[int, int]] = set()
     for block in ordered:
         if block.heading_level is not None and len(block.text) > LABEL_MAX_CHARS:
             continue
+        for hint in block.label_hints:
+            if not any(pattern.search(hint) for pattern in patterns):
+                continue
+            value = _value_from(block.text, field_type)
+            if value and fold(value) != fold(hint):
+                attributed.append((value, hint.rstrip(": "), block.id))
+                break
         for pattern in patterns:
             match = pattern.search(block.text)
             if not match:
@@ -198,6 +206,7 @@ def label_candidates(graph: PageGraph, labels: list[str], field_type: str) -> It
                     inline.append((value, match.group(0), block.id))
             break
     yield from exact
+    yield from attributed
     yield from structural
     yield from inline
 

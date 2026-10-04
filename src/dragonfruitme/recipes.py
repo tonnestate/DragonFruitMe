@@ -16,7 +16,9 @@ from __future__ import annotations
 
 import re
 import sqlite3
+import threading
 import time
+import weakref
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -56,9 +58,25 @@ class Recipe:
 
 
 class RecipeStore:
+    """SQLite-backed recipe and observation store.
+
+    One connection per store (WAL journal, ``synchronous=NORMAL``) instead of a
+    connection per call. Writes are grouped with :meth:`transaction`; the
+    extractor commits once per page and stage group rather than once per field
+    and operation. A crash can lose at most the counters of the page being
+    processed, never a previously committed recipe.
+    """
+
     def __init__(self, path: str | Path):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.RLock()
+        self._depth = 0
+        # isolation_level=None: no implicit transactions; transaction() issues BEGIN/COMMIT itself
+        self._db = sqlite3.connect(self.path, timeout=10, check_same_thread=False, isolation_level=None)
+        self._finalizer = weakref.finalize(self, self._db.close)
+        self._db.execute("PRAGMA journal_mode=WAL")
+        self._db.execute("PRAGMA synchronous=NORMAL")
         with self._connect() as db:
             db.execute(
                 """
@@ -92,13 +110,33 @@ class RecipeStore:
             )
 
     @contextmanager
-    def _connect(self) -> Iterator[sqlite3.Connection]:
-        db = sqlite3.connect(self.path, timeout=10)
-        try:
-            with db:  # commit on success, rollback on error
-                yield db
-        finally:
-            db.close()
+    def transaction(self) -> Iterator[sqlite3.Connection]:
+        """Group reads and writes into one transaction; nested calls join the outer one.
+
+        The outer level takes the write lock up front (``BEGIN IMMEDIATE``) so a
+        concurrent writer in another process waits on the busy timeout instead
+        of failing on a stale read snapshot.
+        """
+        with self._lock:
+            outer = self._depth == 0
+            if outer:
+                self._db.execute("BEGIN IMMEDIATE")
+            self._depth += 1
+            try:
+                yield self._db
+            except BaseException:
+                self._depth -= 1
+                if outer:
+                    self._db.execute("ROLLBACK")
+                raise
+            self._depth -= 1
+            if outer:
+                self._db.execute("COMMIT")
+
+    _connect = transaction
+
+    def close(self) -> None:
+        self._finalizer()
 
     def get(self, scope: str, field: str) -> Recipe | None:
         with self._connect() as db:

@@ -92,6 +92,8 @@ class PageGraph:
     images_missing_alt: int = 0
     script_count: int = 0
     app_root: bool = False
+    # per-page cache of flattened structured data (filled by structured.flatten_page)
+    flat_cache: list[tuple[str, str, Any]] | None = field(default=None, repr=False, compare=False)
 
     @property
     def text_chars(self) -> int:

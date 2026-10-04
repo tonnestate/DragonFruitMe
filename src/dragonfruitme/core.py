@@ -104,6 +104,9 @@ class Engine:
     def forget(self, scope: str, field: str | None = None) -> dict[str, Any]:
         return {"ok": True, "removed": self.store.forget(scope, field)}
 
+    def close(self) -> None:
+        self.store.close()
+
 
 class DragonFruitMe:
     """Three-operation web interface for agents: observe → locate → extract."""
@@ -126,3 +129,13 @@ class DragonFruitMe:
 
     def forget(self, **kwargs: Any) -> dict[str, Any]:
         return safe_call(self.engine.forget, **kwargs)
+
+    def close(self) -> None:
+        """Close the recipe store connection (also happens automatically on garbage collection)."""
+        self.engine.close()
+
+    def __enter__(self) -> "DragonFruitMe":
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        self.close()

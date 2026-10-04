@@ -397,13 +397,17 @@ def extract(
     attempts: dict[str, list[dict[str, Any]]] = {s["name"]: [] for s in specs}
     pages = [first_page]
 
-    for spec in specs:
-        if spec.get("teach") not in (None, ""):
-            results[spec["name"]] = extractor.teach(scope, spec, first_page, attempts[spec["name"]])
-            continue
-        found = extractor.run_cheap_stages(scope, spec, first_page, attempts[spec["name"]], learn)
-        if found:
-            results[spec["name"]] = found
+    # One transaction per page and stage group: recipe lookups, hit/miss
+    # counters, observations and newly compiled recipes commit together.
+    # Rendering runs outside it so no store lock is held during network I/O.
+    with store.transaction():
+        for spec in specs:
+            if spec.get("teach") not in (None, ""):
+                results[spec["name"]] = extractor.teach(scope, spec, first_page, attempts[spec["name"]])
+                continue
+            found = extractor.run_cheap_stages(scope, spec, first_page, attempts[spec["name"]], learn)
+            if found:
+                results[spec["name"]] = found
 
     unresolved = [s for s in specs if s["name"] not in results]
     render_note = None
@@ -418,11 +422,12 @@ def extract(
             else:
                 pages.append(rendered)
                 render_note = {"outcome": "RENDERED"}
-                for spec in unresolved:
-                    attempts[spec["name"]].append({"stage": "render", "outcome": "RENDERED"})
-                    found = extractor.run_cheap_stages(scope, spec, rendered, attempts[spec["name"]], learn)
-                    if found:
-                        results[spec["name"]] = found
+                with store.transaction():
+                    for spec in unresolved:
+                        attempts[spec["name"]].append({"stage": "render", "outcome": "RENDERED"})
+                        found = extractor.run_cheap_stages(scope, spec, rendered, attempts[spec["name"]], learn)
+                        if found:
+                            results[spec["name"]] = found
         else:
             render_note = {"outcome": "SKIP", "reason": "PAGE_NOT_JS_SHELL"}
     elif unresolved and render_page is None:

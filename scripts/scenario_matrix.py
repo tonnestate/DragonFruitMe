@@ -224,7 +224,7 @@ SCENARIOS = [
 def run() -> list[tuple[Scenario, bool, str]]:
     rows = []
     for scenario in SCENARIOS:
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             try:
                 ok, observed = scenario.run(Path(tmp) / "state")
             except Exception as exc:  # a crashing scenario is a failing scenario

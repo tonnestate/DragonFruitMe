@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.1 — 2026-10-05
+
+Throughput: about 11× faster per warm page, with unchanged assurance.
+
+- recipe store keeps one SQLite connection per store (WAL journal, `synchronous=NORMAL`, thread-safe) instead of opening, committing and closing a connection per field and operation;
+- one transaction per page and stage group (`BEGIN IMMEDIATE … COMMIT`); rendering runs outside the transaction so no lock is held during network I/O; a failed page rolls back cleanly;
+- structured data (JSON-LD, embedded JSON, microdata, meta) is parsed and flattened once per page and shared by all fields and independent checks;
+- `DragonFruitMe.close()` and context-manager support; connections also close on garbage collection;
+- `scripts/benchmark.py`: offline benchmark (400 pages × 5 fields) — median 13.9 ms → 1.3 ms per warm page, 70 → ~750 pages/s;
+- the independent check from 0.2.0 is deliberately kept on every hit; it costs ~10 % of the remaining time;
+- store tests for WAL, persistence across instances, rollback, nested transactions, two stores on one file and thread safety; 61 tests.
+
 ## 0.2.0 — 2026-10-04
 
 Extraction assurance: a found value now says who stands behind it, and a recipe hit is no longer trusted blindly.

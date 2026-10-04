@@ -1,4 +1,4 @@
-.PHONY: test install-dev package-check evidence
+.PHONY: test install-dev package-check evidence bench
 
 install-dev:
 	python -m pip install -e '.[dev]'
@@ -11,3 +11,6 @@ package-check:
 
 evidence:
 	python scripts/scenario_matrix.py
+
+bench:
+	python scripts/benchmark.py

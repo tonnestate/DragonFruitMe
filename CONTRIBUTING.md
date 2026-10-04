@@ -29,6 +29,7 @@ Before opening a pull request, run:
 python -m pip install -e '.[dev]'
 python -m compileall -q src
 python scripts/scenario_matrix.py   # regenerates docs/EVIDENCE.md
+python scripts/benchmark.py         # hot-path cost per page; report before/after for performance changes
 pytest
 ```
 

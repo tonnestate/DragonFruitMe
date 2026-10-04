@@ -47,7 +47,17 @@ def _flatten(obj: Any, prefix: str, out: list[tuple[str, Any]]) -> None:
 
 
 def flatten_page(graph: PageGraph) -> list[tuple[str, str, Any]]:
-    """Return ``(source, dotted_path, value)`` triples for all structured data."""
+    """Return ``(source, dotted_path, value)`` triples for all structured data.
+
+    Parsed once per page and cached on the graph: every field and every
+    independent check on the same page reuses it.
+    """
+    if graph.flat_cache is None:
+        graph.flat_cache = _flatten_page(graph)
+    return graph.flat_cache
+
+
+def _flatten_page(graph: PageGraph) -> list[tuple[str, str, Any]]:
     triples: list[tuple[str, str, Any]] = []
     for index, script in enumerate(graph.scripts):
         data = _load_json(script["content"])

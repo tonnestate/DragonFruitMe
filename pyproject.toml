@@ -1,0 +1,55 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dragonfruitme"
+version = "0.1.0"
+description = "Escalating web-to-graph extraction for AI agents: cheapest-first fetching, per-field escalation and compile-once recipes."
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "GPL-3.0-or-later"}
+authors = [{name = "DragonFruitMe contributors"}]
+keywords = [
+  "ai-agents", "mcp", "model-context-protocol", "web-scraping", "extraction",
+  "html", "knowledge-graph", "wrapper-induction", "seo"
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Internet :: WWW/HTTP :: Indexing/Search",
+]
+dependencies = []
+
+[project.optional-dependencies]
+mcp = ["mcp>=2,<3"]
+browser = ["playwright>=1.40,<2"]
+dev = ["pytest>=8.0", "pytest-cov>=5.0"]
+
+[project.scripts]
+dragonfruitme = "dragonfruitme.cli:main"
+dragonfruitme-mcp = "dragonfruitme.mcp_server:main"
+
+[project.urls]
+Repository = "https://github.com/tonnestate/DragonFruitMe"
+Issues = "https://github.com/tonnestate/DragonFruitMe/issues"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["dragonfruitme*"]
+
+[tool.setuptools.package-data]
+dragonfruitme = ["SKILL.md"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

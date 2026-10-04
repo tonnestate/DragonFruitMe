@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.0 — 2026-10-05
+
+Traversal awareness: enumeration can no longer mistake one visible level for whole-source coverage.
+
+- `observe` now returns a separate `traversal` object alongside the page summary; the public agent surface remains exactly `observe → locate → extract`;
+- pagination detection from `rel=next` / `rel=last`, semantic controls (`>`, `>>`, `>>>`, `»»`, Weiter/Next), numeric links, page/offset query parameters and `/page/N` / `/seite/N` paths;
+- when a terminal page is visible, returns `last_page` / `last_url`, `remaining_pages` and a deterministic URL `template`; terminal numeric gaps such as `1 2 3 … 88` are accepted as weaker `terminal-page-gap` evidence;
+- repeated internal URL scopes are grouped into `detail_candidates` / `child_candidates`, exposing likely lower hierarchy levels such as listing → company detail → phone/e-mail;
+- fail-closed coverage: `coverage_status` is `INCOMPLETE` when an open pagination/child edge is proven and otherwise `UNKNOWN`; a single observed page never yields `claim_complete=true`;
+- link `rel` metadata is retained in the page graph for navigation semantics;
+- agent Skill, MCP instructions, README and protocol now require traversal evidence to be checked before completeness claims in enumeration tasks;
+- dedicated traversal tests cover explicit last controls, triple arrows, terminal numeric gaps, unbounded next links, path pagination, repeated detail scopes and the no-false-complete invariant.
+
 ## 0.2.1 — 2026-10-05
 
 Throughput: about 11× faster per warm page, with unchanged assurance.

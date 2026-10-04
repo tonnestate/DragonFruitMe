@@ -1,6 +1,6 @@
-# Architecture and Specification (v0.1)
+# Architecture and Specification (v0.3)
 
-DragonFruitMe has one job: give an AI agent precise, cheap and provable access to the content of web pages. It is built from two graphs and a recipe store.
+DragonFruitMe has one job: give an AI agent precise, cheap and provable access to the content of web pages. It is built from three graphs and a recipe store.
 
 ```text
                  ┌──────────── host-bound ────────────┐
@@ -9,7 +9,7 @@ DragonFruitMe has one job: give an AI agent precise, cheap and provable access t
                  │  UA, deny hosts)   scope + field)  │
                  └────────┬──────────────────┬────────┘
                           │                  │
- agent ── observe ──▶ Fetch ladder ──▶ Page graph ──▶ summary
+ agent ── observe ──▶ Fetch ladder ──▶ Page graph ──▶ summary + traversal graph
        ── locate  ──▶ Fetch ladder ──▶ Page graph ──▶ ranked sub-graph
        ── extract ──▶ Fetch ladder ──▶ Page graph ──▶ Escalation graph ──▶ fields + evidence
                                                           │
@@ -44,7 +44,28 @@ Built with `html.parser` in one pass.
 * **Weights (BM25F field weights):** H1 4.0 · H2 3.0 · H3 2.5 · H4–6 2.0 · body 1.0, multiplied by region (main 1.0, header 0.6, aside 0.5, nav/footer 0.3). Title weight 5.0 is applied as a page-level bonus. Emphasised tokens (`strong b em mark`) get a bonus.
 * **JS-shell score** (0..1): thin text (+0.45), app root `#root/#app/#__next/#__nuxt` (+0.3), ≥5 scripts (+0.15), embedded JSON (−0.2), JSON-LD (−0.1). `needs_render` = score ≥ 0.6.
 
-## 3. Locate (`locate.py`)
+## 3. Traversal and coverage (`traversal.py`)
+
+`observe` analyzes the already-built page graph for navigation structure. It does **not** follow links itself.
+
+Pagination evidence, strongest first:
+
+1. explicit link relations such as `rel=last` / `rel=next`;
+2. semantic controls such as `Weiter`, `>`, `>>`, `>>>`, `»»`;
+3. page/offset markers in query parameters and paths (`?page=42`, `?offset=100`, `/page/42`, `/seite/42`);
+4. a terminal numeric gap such as `1 2 3 … 88`, recorded as weaker `terminal-page-gap` evidence.
+
+When a bound is visible, the result carries `last_page` or `last_offset`, `last_url`, `remaining_pages` and a deterministic URL `template`. Pagination URLs are excluded from child-level inference.
+
+Hierarchy inference groups distinct internal URLs by recipe scope. Repeated scopes such as `/studio/1001`, `/studio/1002` or repeated `/profile?id=...` links become `detail_candidates` / `child_candidates`. This is intentionally evidence, not an automatic crawl plan.
+
+Coverage invariant:
+
+> A single observed page can prove an open traversal edge, but can never prove whole-source completeness.
+
+Therefore `coverage_status` is `INCOMPLETE` when pagination or candidate child levels are open and `UNKNOWN` otherwise. `claim_complete` is always false. This prevents a level-0 listing from being mistaken for complete coverage when phone numbers, e-mail addresses or other fields live one level deeper.
+
+## 4. Locate (`locate.py`)
 
 BM25 (k1 = 1.2, b = 0.75) per block, multiplied by the block weight, plus:
 
@@ -55,7 +76,7 @@ BM25 (k1 = 1.2, b = 0.75) per block, multiplied by the block weight, plus:
 
 Label-like hits (short block) carry the `next` block in the same section — that is where the value usually is. Output is bounded by `max_results` and `max_context_chars` and flags `results_truncated` / `context_truncated`.
 
-## 4. Escalation graph (`extract.py`)
+## 5. Escalation graph (`extract.py`)
 
 Per field, in this order. A stage only counts when its candidate passes `validate()`.
 
@@ -71,7 +92,7 @@ Render policy: `auto` renders only if a field is unresolved **and** the page is 
 
 **Teaching:** a field with `teach` skips stages 1–5 and is checked instead: it must validate against the type and occur in the page (structured value, raw HTML or visible text). Otherwise → `NOT_GROUNDED`. Grounded values are compiled like stage 2/3 hits.
 
-## 5. Recipes (`recipes.py`)
+## 6. Recipes (`recipes.py`)
 
 * **Scope** = host (without `www.`) + up to four path segments, where segments with digits or long slugs become `*`. `/expose/123456` and `/expose/987` share a scope; `/angebote` has its own.
 * **Kinds** in order of preference: `json` (structured path) › `regex` › `label`.
@@ -79,7 +100,7 @@ Render policy: `auto` renders only if a field is unresolved **and** the page is 
 * **Storage:** one SQLite connection per store (WAL journal, `synchronous=NORMAL`, thread-safe via a re-entrant lock). The extractor wraps each page's cheap stages in one `BEGIN IMMEDIATE … COMMIT` transaction (a second one after rendering); rendering itself runs outside any transaction, so no store lock is held during network I/O. A crash loses at most the counters and recipes of the page in progress. Several processes may share one state directory.
 * **Lifecycle:** hit → `hits+1, misses=0, active`; miss → `misses+1`, `stale` after 2 misses; any later hit in stages 2–5 overwrites the recipe (self-healing).
 
-## 6. Assurance: provenance, contradiction, repetition
+## 7. Assurance: provenance, contradiction, repetition
 
 After a stage finds a value, the structured and label stages are asked **independently** about it on the same page:
 
@@ -94,7 +115,7 @@ After a stage finds a value, the structured and label stages are asked **indepen
 
 **Evidence:** `scripts/scenario_matrix.py` drives the engine through 7 pathologies and 6 false-positive controls and renders `docs/EVIDENCE.md`; the test suite fails if a scenario fails or the file is stale. Disabling the independent check makes one pathology and two controls fail, so the matrix measures the mechanism rather than restating it.
 
-## 7. Invariants
+## 8. Invariants
 
 1. No stage may return a value that fails type validation.
 2. No taught value is accepted unless it occurs in the page.
@@ -103,8 +124,9 @@ After a stage finds a value, the structured and label stages are asked **indepen
 5. Blocks, robots disallows and rate limits are final for the call.
 6. The agent can neither choose the filesystem location of the recipe store nor relax the fetch policy.
 7. The core imports only the Python standard library.
+8. One observed page never authorizes a whole-source completeness claim; visible pagination or repeated child scopes remain explicit traversal evidence.
 
-## 8. Deferred
+## 9. Deferred
 
 * CSS/XPath recipe kind and DOM-path anchors next to regex anchors.
 * Multi-value fields (lists, tables → rows).

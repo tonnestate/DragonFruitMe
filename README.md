@@ -12,7 +12,7 @@
 <p align="center">
   <img alt="License" src="https://img.shields.io/badge/license-GPL--3.0-blue">
   <img alt="Status" src="https://img.shields.io/badge/status-experimental-orange">
-  <img alt="Version" src="https://img.shields.io/badge/version-0.2.1-ff2d8a">
+  <img alt="Version" src="https://img.shields.io/badge/version-0.3.0-ff2d8a">
   <img alt="Python" src="https://img.shields.io/badge/python-%3E%3D3.10-3776AB">
   <img alt="Dependencies" src="https://img.shields.io/badge/runtime%20deps-none-brightgreen">
   <img alt="MCP" src="https://img.shields.io/badge/MCP-optional-5b5bd6">
@@ -32,7 +32,7 @@ Most agent web tools pick one cost level and stay there: either a plain request 
 OBSERVE  →  LOCATE  →  EXTRACT
 ```
 
-* **observe** turns a page into a bounded **page graph**: sections from the heading hierarchy, blocks, links, structured data, render need.
+* **observe** turns a page into a bounded **page graph** and adds **traversal evidence**: pagination bounds, next/last controls, repeated child/detail link scopes and conservative coverage status.
 * **locate** answers "where on this page is …?" with the smallest relevant sub-graph, ranked by **on-page relevance signals** (title, heading level, emphasis, anchor text, page region).
 * **extract** pulls typed fields through an **escalation graph** — per field, cheapest stage first — and **compiles** every costly hit into a deterministic recipe, so the next page of the same template is answered by a single regex.
 
@@ -42,7 +42,7 @@ DragonFruitMe contains no LLM, no planner, no stealth tooling and no CAPTCHA sol
 
 ---
 
-## The two graphs
+## The three graphs
 
 ### 1. Page graph (website → graph)
 
@@ -70,6 +70,26 @@ field "kaufpreis" (type: price)
 ```
 
 Each stage must **validate** its candidate against the field type (`price`, `area`, `number`, `integer`, `date`, `email`, `phone`, `url`, `text`, plus optional `min`, `max`, `pattern`). A stage that finds something that is not a valid price does not count, and the field escalates.
+
+### 3. Traversal graph (page → open coverage edges)
+
+For enumeration tasks, finding records on one page is not proof that the source is exhausted. `observe` therefore returns a separate `traversal` object:
+
+```text
+listing page
+   ├── pagination ──▶ next page ──▶ … ──▶ last page
+   └── child scope ─▶ detail page ──▶ phone / e-mail / deeper data
+```
+
+DragonFruitMe recognizes `rel=next` / `rel=last`, numeric page links, common page/offset URL parameters, `/page/42` / `/seite/42`, and navigation controls such as `>`, `>>`, `>>>`, `»»`. When the UI exposes a terminal page, it returns `last_page`, `last_url`, `remaining_pages` and a deterministic URL `template` such as `?page={page}`.
+
+Repeated internal URL scopes are grouped as candidate child/detail levels. Three links such as `/studio/1001`, `/studio/1002`, `/studio/1003` therefore become one `detail_candidates` collection instead of being treated as unrelated links.
+
+The coverage rule is intentionally fail-closed:
+
+> **One observed page may prove that traversal is incomplete, but it can never by itself prove that a whole source is complete.**
+
+`coverage_status` is therefore `INCOMPLETE` when pagination or lower-level candidates are visible, otherwise `UNKNOWN`. `claim_complete` remains false. DragonFruitMe exposes the frontier; it still does not autonomously crawl it.
 
 **Compile once.** When stage 2–5 finds a field, DragonFruitMe derives the cheapest stable recipe and stores it per *scope* (host + URL template, e.g. `example.de/expose/*`):
 
@@ -106,14 +126,15 @@ An agent can never raise the provenance of its own claim; only independent stage
 
 ---
 
-## What DragonFruitMe v0.2.1 can do today
+## What DragonFruitMe v0.3.0 can do today
 
-| Capability | v0.2.1 behavior |
+| Capability | v0.3.0 behavior |
 |---|---|
 | Fetch ladder | Inline HTML → stdlib HTTP (gzip/deflate, charset detection) → optional Playwright rendering. |
 | Polite by default | Honest User-Agent, robots.txt honoured, per-host minimum interval, response size cap, page cache (observe + locate + extract = one request). |
 | Challenge handling | CAPTCHA/bot challenges and HTTP 429 end with `BLOCKED` / `RATE_LIMITED` and a `next` hint (human-in-the-loop, official API/feed). A CAPTCHA widget inside a normal content page is *not* treated as a block. |
 | Page graph | Sections from heading hierarchy, block kinds, table rows, regions (main/nav/header/aside/footer), emphasis, links with anchor text, canonical, feeds, meta, images missing `alt`. |
+| Traversal / coverage | `observe.traversal` detects pagination, last-page bounds and URL templates plus repeated child/detail link scopes. Signals: `PAGINATION_OPEN`, `PAGINATION_UNBOUNDED`, `CHILD_LEVEL_CANDIDATES`. A single page never yields a completeness claim. |
 | JS-shell detection | `js_shell_score` / `needs_render` from text volume, app roots, script count and presence of embedded data. |
 | Relevance search | BM25F-style ranking with heading/region/emphasis weights, section-heading propagation and label → value neighbours. Bounded and truncation-flagged. |
 | Structured data | JSON-LD (incl. `@graph`), `application/json` / `__NEXT_DATA__`, microdata `itemprop`, meta and Open Graph — matched by alias or explicit dotted path. |
@@ -251,7 +272,7 @@ The Skill lives at `src/dragonfruitme/SKILL.md` (packaged) with byte-identical m
 * **No CAPTCHA solving, no stealth, no fingerprint spoofing, no proxy rotation.** A challenge is the site owner saying "no bots". DragonFruitMe stops, says so and points to the honest alternatives. This keeps the project publishable and usable inside companies.
 * **No SEO crawler.** On-page signals are used for relevance ranking, not for reports. Off-page metrics belong to dedicated providers.
 * **No LLM inside.** Extraction is deterministic; the agent is the teacher of last resort.
-* **No crawling frontier.** DragonFruitMe works on the pages an agent asks for. `observe` returns internal links; following them is the agent's decision.
+* **No autonomous crawling frontier.** DragonFruitMe detects pagination and candidate hierarchy levels, but following them remains the agent/host decision under the same fetch policy.
 
 ## Donors and prior art
 
@@ -268,4 +289,4 @@ See [`docs/donor-map.md`](docs/donor-map.md) and [`docs/research-basis.md`](docs
 
 ## Status
 
-v0.2.1 is experimental. The public agent surface (`observe → locate → extract`) remains intentionally small; `extract-batch` is a host-side throughput path for explicit URL sets. Recipe derivation, ranking and the render stage will evolve. Licensed under GPL-3.0-only.
+v0.3.0 is experimental. The public agent surface (`observe → locate → extract`) remains intentionally small; `extract-batch` is a host-side throughput path for explicit URL sets. Recipe derivation, ranking and the render stage will evolve. Licensed under GPL-3.0-only.

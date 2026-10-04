@@ -11,9 +11,15 @@ Every operation takes exactly one source:
 
 ## `observe(url | html, base_url?)`
 
-Returns `page` (fetch info), `scope`, `summary` and `render_available`.
+Returns `page` (fetch info), `scope`, `summary`, `traversal` and `render_available`.
 
 `summary`: `title, lang, meta_description, meta_robots, canonical, h1[], outline[] (+outline_truncated), counts{blocks, text_chars, links_internal, links_external, links_nofollow, images, images_missing_alt}, structured_data{jsonld_blocks, embedded_json_blocks, itemprops, open_graph[]}, feeds[], internal_links[] (+internal_links_truncated), js_shell_score, needs_render`.
+
+`traversal`: `coverage_status (INCOMPLETE | UNKNOWN), claim_complete=false, signals[], known_open_urls, pagination, child_collections[], next`.
+
+`pagination`: `detected, kind (page | offset | null), current_page/current_offset, last_page/last_offset, highest_visible_page/highest_visible_offset, next_url, prev_url, first_url, last_url, last_evidence, bounded, has_next, remaining_pages, template, visible_page_numbers[]`. Last-page evidence is strongest for `rel=last` / explicit last controls (`>>`, `>>>`, `»»`); a terminal numeric gap such as `1 2 3 … 88` is recorded as `terminal-page-gap`.
+
+`child_collections[]`: repeated internal URL scopes that may represent another hierarchy level: `{scope, kind: detail_candidates|child_candidates, count, sample[]}`. For enumeration tasks, any `PAGINATION_OPEN`, `PAGINATION_UNBOUNDED` or `CHILD_LEVEL_CANDIDATES` signal forbids a completeness claim. Absence of a signal still means `UNKNOWN`, not complete.
 
 ## `locate(query, url | html, base_url?, max_results=8, max_context_chars=4000)`
 

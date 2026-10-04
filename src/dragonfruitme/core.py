@@ -11,6 +11,7 @@ from .graph import build_graph, summarize
 from .locate import locate as locate_core
 from .policy import FetchPolicy
 from .recipes import RecipeStore, scope_of
+from .traversal import analyze_traversal
 
 
 def safe_call(fn: Callable[..., dict[str, Any]], /, *args: Any, **kwargs: Any) -> dict[str, Any]:
@@ -64,6 +65,7 @@ class Engine:
             "page": result.info(),
             "scope": scope_of(result.final_url or result.url),
             "summary": summarize(graph, max_outline=max_outline, max_links=max_links),
+            "traversal": analyze_traversal(graph),
             "render_available": self.fetcher.can_render(),
         }
 

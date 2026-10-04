@@ -144,3 +144,20 @@ def test_observe_exposes_traversal_without_new_agent_operation(tmp_path):
     assert result["ok"] is True
     assert result["traversal"]["coverage_status"] == "INCOMPLETE"
     assert result["traversal"]["pagination"]["last_page"] == 40
+
+
+def test_head_link_rel_last_and_next_are_traversal_evidence():
+    html = """
+    <html><head>
+      <link rel="next" href="/directory?page=2">
+      <link rel="last" href="/directory?page=77">
+    </head><body><p>Results</p></body></html>
+    """
+    graph = build_graph(html, "https://example.org/directory?page=1")
+    traversal = analyze_traversal(graph)
+    p = traversal["pagination"]
+
+    assert p["next_url"] == "https://example.org/directory?page=2"
+    assert p["last_url"] == "https://example.org/directory?page=77"
+    assert p["last_page"] == 77
+    assert p["last_evidence"] == "rel=last"

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.2 — 2026-10-04
+
+Batch robustness and recipe stability.
+
+- `extract-batch --resume` terminates a torn last line before appending, so a row interrupted mid-write can no longer corrupt the next record;
+- `--resume` now skips only URLs whose latest row is final (success or `recoverable: false`, e.g. `BLOCKED`, `ROBOTS_DISALLOWED`) and retries transient failures (`FETCH_FAILED`, HTTP 5xx); the latest row per URL wins;
+- regex recipes now generalise every digit run inside markup (`data-id="1"` → `\d+`), not only runs of three or more digits; digits in visible label text stay literal. Previously short per-page ids broke recipe reuse;
+- end-to-end batch test proving that the second URL of a template is served by stage 1;
+- README table fix; `extract-batch` documented in `docs/START_HERE.md` and `docs/protocol.md`;
+- documentation describes DragonFruitMe on its own, without references to related projects.
+
 ## 0.1.1 — 2026-10-04
 
 Progress-preserving batch extraction for large explicit URL sets.
@@ -14,7 +25,7 @@ Progress-preserving batch extraction for large explicit URL sets.
 
 ## 0.1.0 — 2026-10-04
 
-Initial DragonFruitMe foundation, modelled on BananaMe's repository and interface discipline.
+Initial DragonFruitMe foundation.
 
 - public agent surface: `observe`, `locate`, `extract` (Python API, CLI, Agent Skill, optional MCP server on one core);
 - fetch ladder: inline HTML → stdlib HTTP (gzip/deflate, charset detection) → optional Playwright render stage;

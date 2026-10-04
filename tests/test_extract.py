@@ -119,3 +119,12 @@ def test_field_errors_are_machine_readable(tool):
     assert tool.extract(fields=["a", "a"], html="<p>x</p>")["error"]["code"] == "FIELD_DUPLICATE"
     assert tool.extract(fields=["a"])["error"]["code"] == "SOURCE_REQUIRED"
     assert tool.extract(fields=["a"], html="<p>x</p>", render="always")["error"]["code"] == "RENDER_MODE_INVALID"
+
+
+def test_anchor_generalises_ids_in_markup_but_not_digits_in_visible_text():
+    from dragonfruitme.recipes import _anchor_regex
+
+    pattern = _anchor_regex('3-Zimmer</dt><dd class="p" data-id="7">')
+    assert pattern.startswith("3\\-Zimmer")  # visible label digits stay literal
+    assert 'data\\-id="\\d+"' in pattern     # short markup id is generalised
+    assert _anchor_regex('d="12">Preis').startswith('d="\\d+">')  # window starting inside a tag

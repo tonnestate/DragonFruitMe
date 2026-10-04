@@ -44,6 +44,19 @@ Field result: `name, type, status, value, normalized, stage, page_stage, evidenc
 
 Call result: `status (COMPLETE | PARTIAL | INCOMPLETE), scope, fields[], pages[], found, total`.
 
+## `extract-batch` (host-side CLI only, not an agent operation)
+
+```bash
+dragonfruitme extract-batch --urls-file FILE --fields-json JSON [--output OUT.jsonl] [--resume]
+                            [--render auto|on_miss|never] [--no-learn] [--fail-on-error]
+```
+
+* Input: one URL per line (`#` comments allowed) or a JSON array; duplicates are removed, order is kept.
+* Output: one JSONL row per URL, `{"url": ..., <extract result>}`, flushed immediately; stdout if `--output` is omitted.
+* Summary on stderr: `{"ok": true, "batch": {total, skipped, attempted, complete, partial, incomplete, errors}}`.
+* `--resume` (requires `--output`): repairs a torn last line, skips URLs whose latest row is final (`ok: true` or `error.recoverable: false`), retries the rest. The latest row per URL is authoritative.
+* Exit code 0 unless `--fail-on-error` is set and at least one URL failed (then 2).
+
 ## Attempt outcomes
 
 | stage | outcomes |

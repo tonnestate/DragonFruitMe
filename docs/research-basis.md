@@ -26,7 +26,7 @@ DragonFruitMe's ideas are old; the combination and the agent interface are new. 
 
 ## Agent interfaces
 
-* The compact-interface argument from SWE-agent / BananaMe applies to the web as well: fewer, well-typed operations with bounded outputs beat raw page dumps for agent reliability and token cost.
+* The compact-interface argument from SWE-agent applies to the web as well: fewer, well-typed operations with bounded outputs beat raw page dumps for agent reliability and token cost.
 * LLM-based extraction (e.g. ScrapeGraphAI) shows that models can extract from arbitrary layouts; DragonFruitMe uses that capability once per template (teaching) rather than per page.
 
 ## Open questions for evaluation

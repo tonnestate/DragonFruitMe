@@ -41,22 +41,47 @@ def _read_urls(path: str) -> list[str]:
     return urls
 
 
+def _is_final(row: dict) -> bool:
+    """A row is final if it succeeded or failed for a reason a retry cannot fix.
+
+    Transient failures (``recoverable: true`` such as FETCH_FAILED or HTTP 5xx)
+    are retried on ``--resume``; BLOCKED, ROBOTS_DISALLOWED and other
+    non-recoverable errors are not.
+    """
+    if row.get("ok") is True:
+        return True
+    error = row.get("error")
+    return isinstance(error, dict) and error.get("recoverable") is False
+
+
 def _resume_urls(path: Path) -> set[str]:
-    """Return URLs already durably written to a JSONL output file."""
-    done: set[str] = set()
+    """Return URLs whose latest durably written JSONL row is final."""
+    latest: dict[str, bool] = {}
     if not path.exists():
-        return done
+        return set()
     for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
         if not line.strip():
             continue
         try:
             row = json.loads(line)
         except json.JSONDecodeError:
-            continue
+            continue  # torn line from an interrupted write: its URL is retried
         url = row.get("url") if isinstance(row, dict) else None
         if isinstance(url, str) and url:
-            done.add(url)
-    return done
+            latest[url] = _is_final(row)
+    return {url for url, final in latest.items() if final}
+
+
+def _ensure_line_boundary(path: Path) -> None:
+    """Terminate a torn last line so appended rows stay valid JSONL."""
+    if not path.exists() or path.stat().st_size == 0:
+        return
+    with path.open("rb") as handle:
+        handle.seek(-1, 2)
+        last = handle.read(1)
+    if last != b"\n":
+        with path.open("ab") as handle:
+            handle.write(b"\n")
 
 
 def _batch_extract(args: argparse.Namespace, tool: DragonFruitMe) -> int:
@@ -67,6 +92,8 @@ def _batch_extract(args: argparse.Namespace, tool: DragonFruitMe) -> int:
 
     if output_path is not None:
         output_path.parent.mkdir(parents=True, exist_ok=True)
+        if args.resume:
+            _ensure_line_boundary(output_path)
         mode = "a" if args.resume else "w"
         stream = output_path.open(mode, encoding="utf-8", newline="\n")
         close_stream = True
@@ -156,7 +183,7 @@ def main(argv: list[str] | None = None) -> None:
     p_batch.add_argument("--fields-json", type=_json, required=True)
     p_batch.add_argument("--output", help="JSONL output path; stdout when omitted")
     p_batch.add_argument("--resume", action="store_true",
-                         help="append to --output and skip URLs already durably present there")
+                         help="append to --output; skip URLs whose last row is final, retry transient failures")
     p_batch.add_argument("--render", choices=["auto", "on_miss", "never"], default="auto")
     p_batch.add_argument("--no-learn", action="store_true")
     p_batch.add_argument("--fail-on-error", action="store_true",

@@ -72,6 +72,17 @@ dragonfruitme recipes --scope example.org/expose/*
 dragonfruitme forget --scope example.org/expose/* --field provision
 ```
 
+## Many URLs at once
+
+For an explicit list of already-known URLs, use the host-side batch runner instead of a hand-written loop:
+
+```bash
+dragonfruitme extract-batch --urls-file urls.txt --fields-json '[{"name": "kaufpreis", "type": "price"}]' \
+  --output results.jsonl --resume
+```
+
+One recipe store stays warm across the run, so the first pages teach recipes and the rest are answered by stage 1. Each URL is written and flushed as one JSONL row. After an interruption, run the same command again: finished URLs are skipped, transient failures are retried, and a row torn by the interruption is repaired.
+
 ## When the answer is BLOCKED
 
 `BLOCKED`, `RATE_LIMITED` and `ROBOTS_DISALLOWED` are final. Use the site's official API or feed, ask a human, or choose another source. DragonFruitMe will not try to get around them, and agents using it should not either.

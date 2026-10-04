@@ -11,6 +11,5 @@ DragonFruitMe is a reuse-first composition, not a fork. Concepts are borrowed; n
 | Learning rules from examples | AutoScraper (rules from example values) | rules learned from *validated* stage hits and *grounded* agent teaching, scoped per URL template, self-healing |
 | Lightweight rendering for agents | Obscura (Rust headless browser with CDP/MCP) | candidate engine for the optional render stage |
 | On-page signals | the author's earlier SEO on-page parser (headings, emphasis, link classes, alt coverage) | used as relevance weights for ranking, not as an SEO report |
-| Small, fail-closed agent surface | BananaMe (`understand → mutate → verify`) | same design discipline: three operations, host-bound state, machine-readable evidence |
 
 See `research-basis.md` for the academic lineage (wrapper induction, wrapper maintenance, boilerplate detection, BM25F).

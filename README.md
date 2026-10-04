@@ -12,7 +12,7 @@
 <p align="center">
   <img alt="License" src="https://img.shields.io/badge/license-GPL--3.0-blue">
   <img alt="Status" src="https://img.shields.io/badge/status-experimental-orange">
-  <img alt="Version" src="https://img.shields.io/badge/version-0.1.1-ff2d8a">
+  <img alt="Version" src="https://img.shields.io/badge/version-0.1.2-ff2d8a">
   <img alt="Python" src="https://img.shields.io/badge/python-%3E%3D3.10-3776AB">
   <img alt="Dependencies" src="https://img.shields.io/badge/runtime%20deps-none-brightgreen">
   <img alt="MCP" src="https://img.shields.io/badge/MCP-optional-5b5bd6">
@@ -85,9 +85,9 @@ On the next page of the same template, stage 1 answers in microseconds. If the s
 
 ---
 
-## What DragonFruitMe v0.1.1 can do today
+## What DragonFruitMe v0.1.2 can do today
 
-| Capability | v0.1.1 behavior |
+| Capability | v0.1.2 behavior |
 |---|---|
 | Fetch ladder | Inline HTML → stdlib HTTP (gzip/deflate, charset detection) → optional Playwright rendering. |
 | Polite by default | Honest User-Agent, robots.txt honoured, per-host minimum interval, response size cap, page cache (observe + locate + extract = one request). |
@@ -101,13 +101,14 @@ On the next page of the same template, stage 1 answers in microseconds. If the s
 | Compile-once recipes | JSON-path, label-anchored regex or label recipes per host + URL template in SQLite; hit/miss counters, stale marking, self-healing re-compilation. |
 | Agent teaching | `teach` values must be grounded in the page; then compiled into recipes. |
 | Evidence trail | Every field returns `stage`, `page_stage`, `evidence`, `recipe` and the full `attempts` path through the escalation graph. |
-| Interfaces | Python API, CLI, Agent Skill and optional MCP server — all on the same core. State directory and fetch policy are **host-bound**, never agent-supplied. |\n| Batch extraction | Host-side `extract-batch` processes explicit URL sets with one warm recipe store, immediate JSONL persistence, `--resume`, de-duplication and progress-preserving per-URL failure handling. |
+| Interfaces | Python API, CLI, Agent Skill and optional MCP server — all on the same core. State directory and fetch policy are **host-bound**, never agent-supplied. |
+| Batch extraction | Host-side `extract-batch` processes explicit URL sets with one warm recipe store, immediate JSONL persistence, de-duplication and progress-preserving per-URL failure handling. `--resume` repairs a torn last line, skips final rows and retries transient failures. |
 
 The core has **no mandatory third-party runtime dependencies**. MCP and the browser stage are optional extras.
 
 ### Repository/layout invariant
 
-Like BananaMe, DragonFruitMe keeps its own release repository shallow: no ordinary project file deeper than two directories (`.github/workflows/` is the exception). The package itself has no sub-packages.
+DragonFruitMe keeps its own release repository shallow: no ordinary project file deeper than two directories (`.github/workflows/` is the exception). The package itself has no sub-packages.
 
 ---
 
@@ -152,7 +153,7 @@ dragonfruitme extract-batch \
   --resume
 ```
 
-The input is either one URL per line or a JSON array. DragonFruitMe keeps one recipe store warm across the run, writes and flushes one JSONL record after every URL, skips already-written URLs on `--resume`, and continues after per-URL failures. This is deliberately **not** a crawler frontier: DragonFruitMe processes the explicit URL set it is given and does not invent discovery strategy.
+The input is either one URL per line or a JSON array. DragonFruitMe keeps one recipe store warm across the run, writes and flushes one JSONL record after every URL, and continues after per-URL failures. On `--resume` it repairs a row torn by an interruption, skips URLs whose latest row is final (success, or a non-recoverable error such as `BLOCKED`) and retries transient failures such as `FETCH_FAILED` or HTTP 5xx. Retried URLs get a new row; consumers take the last row per URL. This is deliberately **not** a crawler frontier: DragonFruitMe processes the explicit URL set it is given and does not invent discovery strategy.
 
 ### Python
 
@@ -224,10 +225,6 @@ The Skill lives at `src/dragonfruitme/SKILL.md` (packaged) with byte-identical m
 * **No LLM inside.** Extraction is deterministic; the agent is the teacher of last resort.
 * **No crawling frontier.** DragonFruitMe works on the pages an agent asks for. `observe` returns internal links; following them is the agent's decision.
 
-## Relationship to the other fruits
-
-DragonFruitMe is independent and runs on its own.
-
 ## Donors and prior art
 
 See [`docs/donor-map.md`](docs/donor-map.md) and [`docs/research-basis.md`](docs/research-basis.md). In short: Crawlee's adaptive HTTP/browser switching, Scrapling's layered fetchers, Agent Reach's ordered fallback channels, ScrapeGraphAI's graph pipelines, AutoScraper and decades of wrapper-induction research. DragonFruitMe's delta is the combination: **per-field escalation + compile-once, label-anchored recipes + an SEO-weighted page graph as the agent interface + grounded teaching**, in a zero-dependency core.
@@ -242,4 +239,4 @@ See [`docs/donor-map.md`](docs/donor-map.md) and [`docs/research-basis.md`](docs
 
 ## Status
 
-v0.1.1 is experimental. The public agent surface (`observe → locate → extract`) remains intentionally small; `extract-batch` is a host-side throughput path for explicit URL sets. Recipe derivation, ranking and the render stage will evolve. Licensed under GPL-3.0-only.
+v0.1.2 is experimental. The public agent surface (`observe → locate → extract`) remains intentionally small; `extract-batch` is a host-side throughput path for explicit URL sets. Recipe derivation, ranking and the render stage will evolve. Licensed under GPL-3.0-only.

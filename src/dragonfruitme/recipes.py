@@ -159,14 +159,41 @@ def apply_regex(pattern: str, html: str) -> str | None:
 
 
 def _anchor_regex(left: str) -> str:
-    """Escape a left context; generalise whitespace and long digit runs (ids)."""
+    """Escape a left context and generalise what changes from page to page.
+
+    Whitespace becomes ``\\s*``. Digit runs inside markup (``data-id="1"``,
+    ``id="item-4711"``) become ``\\d+`` because ids differ per page; digits
+    in visible text, such as a label "3-Zimmer", stay literal. Long digit
+    runs (>= 3) are generalised everywhere.
+    """
+    # Characters before the first '<' belong to a tag if a '>' closes it first.
+    first_open, first_close = left.find("<"), left.find(">")
+    in_tag = first_close != -1 and (first_open == -1 or first_close < first_open)
     out: list[str] = []
-    last = 0
-    for m in re.finditer(r"\s+|\d{3,}", left):
-        out.append(re.escape(left[last:m.start()]))
-        out.append(r"\s*" if m.group(0).isspace() else r"\d+")
-        last = m.end()
-    out.append(re.escape(left[last:]))
+    i = 0
+    while i < len(left):
+        ch = left[i]
+        if ch.isspace():
+            j = i
+            while j < len(left) and left[j].isspace():
+                j += 1
+            out.append(r"\s*")
+            i = j
+            continue
+        if ch.isdigit():
+            j = i
+            while j < len(left) and left[j].isdigit():
+                j += 1
+            run = left[i:j]
+            out.append(r"\d+" if in_tag or len(run) >= 3 else re.escape(run))
+            i = j
+            continue
+        if ch == "<":
+            in_tag = True
+        elif ch == ">":
+            in_tag = False
+        out.append(re.escape(ch))
+        i += 1
     return "".join(out)
 
 

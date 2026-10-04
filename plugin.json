@@ -7,7 +7,7 @@
     "name": "TonnEstate"
   },
   "repository": "https://github.com/tonnestate/DragonFruitMe",
-  "license": "GPL-3.0-or-later",
+  "license": "GPL-3.0-only",
   "keywords": [
     "ai-agents",
     "mcp",

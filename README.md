@@ -227,4 +227,4 @@ See [`docs/donor-map.md`](docs/donor-map.md) and [`docs/research-basis.md`](docs
 
 ## Status
 
-v0.1.0 is experimental. The public surface (`observe → locate → extract`) is meant to stay stable; recipe derivation, ranking and the render stage will evolve. Licensed under GPL-3.0-or-later.
+v0.1.0 is experimental. The public surface (`observe → locate → extract`) is meant to stay stable; recipe derivation, ranking and the render stage will evolve. Licensed under GPL-3.0-only.

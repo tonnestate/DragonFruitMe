@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.2 — 2026-10-05
+
+Real-world edge hardening without widening the agent surface.
+
+- `extract-batch` now aggregates operational failure telemetry in its final summary: `error_codes`, `field_statuses`, `stage_hits` and field `signals`; this makes real deployment failure clusters visible without changing per-row result contracts;
+- adversarial regression tests cover malformed closing tags, script/style/template/noscript noise, duplicate labels across cards, deeply nested component wrappers and the bounded structural-lookahead invariant;
+- accessible names such as `aria-label` are deliberately **not** promoted into generic field labels: an accessible name identifies an element, not necessarily the semantic name of its descendant value; unsupported layouts fail closed to `NEEDS_AGENT`;
+- aggressive bot challenges remain an explicit policy boundary: no stealth, CAPTCHA solving, proxy rotation or bypass logic was added;
+- no new public operation, MCP tool, crawler frontier or runtime dependency.
+
 ## 0.3.1 — 2026-10-05
 
 Structural label resolution for modern component/CSS layouts.

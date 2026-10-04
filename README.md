@@ -85,9 +85,9 @@ On the next page of the same template, stage 1 answers in microseconds. If the s
 
 ---
 
-## What DragonFruitMe v0.1.0 can do today
+## What DragonFruitMe v0.1.1 can do today
 
-| Capability | v0.1.0 behavior |
+| Capability | v0.1.1 behavior |
 |---|---|
 | Fetch ladder | Inline HTML → stdlib HTTP (gzip/deflate, charset detection) → optional Playwright rendering. |
 | Polite by default | Honest User-Agent, robots.txt honoured, per-host minimum interval, response size cap, page cache (observe + locate + extract = one request). |
@@ -101,7 +101,7 @@ On the next page of the same template, stage 1 answers in microseconds. If the s
 | Compile-once recipes | JSON-path, label-anchored regex or label recipes per host + URL template in SQLite; hit/miss counters, stale marking, self-healing re-compilation. |
 | Agent teaching | `teach` values must be grounded in the page; then compiled into recipes. |
 | Evidence trail | Every field returns `stage`, `page_stage`, `evidence`, `recipe` and the full `attempts` path through the escalation graph. |
-| Interfaces | Python API, CLI, Agent Skill and optional MCP server — all on the same core. State directory and fetch policy are **host-bound**, never agent-supplied. |
+| Interfaces | Python API, CLI, Agent Skill and optional MCP server — all on the same core. State directory and fetch policy are **host-bound**, never agent-supplied. |\n| Batch extraction | Host-side `extract-batch` processes explicit URL sets with one warm recipe store, immediate JSONL persistence, `--resume`, de-duplication and progress-preserving per-URL failure handling. |
 
 The core has **no mandatory third-party runtime dependencies**. MCP and the browser stage are optional extras.
 
@@ -242,4 +242,4 @@ See [`docs/donor-map.md`](docs/donor-map.md) and [`docs/research-basis.md`](docs
 
 ## Status
 
-v0.1.0 is experimental. The public surface (`observe → locate → extract`) is meant to stay stable; recipe derivation, ranking and the render stage will evolve. Licensed under GPL-3.0-only.
+v0.1.1 is experimental. The public agent surface (`observe → locate → extract`) remains intentionally small; `extract-batch` is a host-side throughput path for explicit URL sets. Recipe derivation, ranking and the render stage will evolve. Licensed under GPL-3.0-only.

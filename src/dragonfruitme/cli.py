@@ -19,6 +19,106 @@ def _source(args: argparse.Namespace) -> dict:
     return {"url": args.url}
 
 
+def _read_urls(path: str) -> list[str]:
+    """Read an explicit URL set from a JSON array or a line-delimited text file."""
+    source = Path(path)
+    text = source.read_text(encoding="utf-8", errors="replace")
+    stripped = text.lstrip()
+    if stripped.startswith("["):
+        data = json.loads(text)
+        if not isinstance(data, list):
+            raise ValueError("URL JSON must be an array")
+        values = [str(value).strip() for value in data]
+    else:
+        values = [line.strip() for line in text.splitlines() if line.strip() and not line.lstrip().startswith("#")]
+    urls: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        urls.append(value)
+    return urls
+
+
+def _resume_urls(path: Path) -> set[str]:
+    """Return URLs already durably written to a JSONL output file."""
+    done: set[str] = set()
+    if not path.exists():
+        return done
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        url = row.get("url") if isinstance(row, dict) else None
+        if isinstance(url, str) and url:
+            done.add(url)
+    return done
+
+
+def _batch_extract(args: argparse.Namespace, tool: DragonFruitMe) -> int:
+    """Process an explicit URL set without turning the agent into a loop/merge engine."""
+    urls = _read_urls(args.urls_file)
+    output_path = Path(args.output).expanduser() if args.output else None
+    done = _resume_urls(output_path) if (args.resume and output_path is not None) else set()
+
+    if output_path is not None:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        mode = "a" if args.resume else "w"
+        stream = output_path.open(mode, encoding="utf-8", newline="\n")
+        close_stream = True
+    else:
+        stream = sys.stdout
+        close_stream = False
+
+    counts = {
+        "total": len(urls),
+        "skipped": 0,
+        "attempted": 0,
+        "complete": 0,
+        "partial": 0,
+        "incomplete": 0,
+        "errors": 0,
+    }
+
+    try:
+        for url in urls:
+            if url in done:
+                counts["skipped"] += 1
+                continue
+            counts["attempted"] += 1
+            result = tool.extract(
+                fields=args.fields_json,
+                url=url,
+                render=args.render,
+                learn=not args.no_learn,
+            )
+            row = {"url": url, **result}
+            stream.write(json.dumps(row, ensure_ascii=False, separators=(",", ":")) + "\n")
+            stream.flush()
+
+            if not result.get("ok"):
+                counts["errors"] += 1
+                continue
+            status = str(result.get("status", "")).lower()
+            if status in {"complete", "partial", "incomplete"}:
+                counts[status] += 1
+            else:
+                counts["errors"] += 1
+    finally:
+        if close_stream:
+            stream.close()
+
+    summary = {"ok": True, "batch": counts}
+    sys.stderr.write(json.dumps(summary, ensure_ascii=False, separators=(",", ":")) + "\n")
+    if args.fail_on_error and counts["errors"]:
+        return 2
+    return 0
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="dragonfruitme", description="Escalating web-to-graph extraction for AI agents")
     parser.add_argument("--state-dir", help="recipe store directory (default: $DRAGONFRUITME_STATE_DIR or ~/.dragonfruitme)")
@@ -48,6 +148,20 @@ def main(argv: list[str] | None = None) -> None:
     p_extract.add_argument("--render", choices=["auto", "on_miss", "never"], default="auto")
     p_extract.add_argument("--no-learn", action="store_true")
 
+    p_batch = sub.add_parser(
+        "extract-batch",
+        help="extract the same fields from an explicit URL set; JSONL output is flushed after every URL",
+    )
+    p_batch.add_argument("--urls-file", required=True, help="newline-delimited URLs or a JSON array of URLs")
+    p_batch.add_argument("--fields-json", type=_json, required=True)
+    p_batch.add_argument("--output", help="JSONL output path; stdout when omitted")
+    p_batch.add_argument("--resume", action="store_true",
+                         help="append to --output and skip URLs already durably present there")
+    p_batch.add_argument("--render", choices=["auto", "on_miss", "never"], default="auto")
+    p_batch.add_argument("--no-learn", action="store_true")
+    p_batch.add_argument("--fail-on-error", action="store_true",
+                         help="exit 2 if any URL failed; default is progress-preserving exit 0")
+
     p_recipes = sub.add_parser("recipes", help="list stored recipes")
     p_recipes.add_argument("--scope")
 
@@ -56,6 +170,9 @@ def main(argv: list[str] | None = None) -> None:
     p_forget.add_argument("--field")
 
     args = parser.parse_args(argv)
+    if args.command == "extract-batch" and args.resume and not args.output:
+        parser.error("--resume requires --output")
+
     policy = FetchPolicy.from_env()
     if args.ignore_robots:
         policy.respect_robots = False
@@ -70,6 +187,8 @@ def main(argv: list[str] | None = None) -> None:
     elif args.command == "extract":
         result = tool.extract(fields=args.fields_json, scope=args.scope, render=args.render,
                               learn=not args.no_learn, **_source(args))
+    elif args.command == "extract-batch":
+        raise SystemExit(_batch_extract(args, tool))
     elif args.command == "recipes":
         result = tool.recipes(scope=args.scope)
     else:

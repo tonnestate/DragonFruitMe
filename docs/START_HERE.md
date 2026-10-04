@@ -32,9 +32,30 @@ Next exposé of the same site → stage 1 (one regex) for every field
 dragonfruitme observe --url https://example.org/expose/4711
 ```
 
-Check `outline`, `structured_data` and `needs_render`. If `jsonld_blocks > 0`, give your fields `paths` such as `offers.price`.
+Check `outline`, `structured_data`, `needs_render` and `traversal`. If `jsonld_blocks > 0`, give your fields `paths` such as `offers.price`. For enumeration tasks, do not claim completeness while `traversal.signals` contains `PAGINATION_OPEN`, `PAGINATION_UNBOUNDED` or `CHILD_LEVEL_CANDIDATES`.
 
-### 2. Find where things are
+### 2. Check whether the source has another level
+
+For directories, catalogues and search results, inspect the traversal object before extracting records:
+
+```json
+{
+  "coverage_status": "INCOMPLETE",
+  "claim_complete": false,
+  "signals": ["PAGINATION_OPEN", "CHILD_LEVEL_CANDIDATES"],
+  "pagination": {
+    "current_page": 1,
+    "last_page": 88,
+    "next_url": "https://example.org/studios?page=2",
+    "last_url": "https://example.org/studios?page=88",
+    "template": "https://example.org/studios?page={page}"
+  }
+}
+```
+
+A last-page control such as `>>`, `>>>`, `»»` or `rel=last` gives DragonFruitMe a hard traversal bound. Repeated links such as `/studio/1001`, `/studio/1002`, `/studio/1003` are grouped as a candidate detail level. Follow those levels under the normal fetch policy before calling a directory complete.
+
+### 3. Find where things are
 
 ```bash
 dragonfruitme locate --url https://example.org/expose/4711 --query "Kaufpreis Provision"
@@ -42,7 +63,7 @@ dragonfruitme locate --url https://example.org/expose/4711 --query "Kaufpreis Pr
 
 The top hit is usually the label; its `next` block is usually the value.
 
-### 3. Extract typed fields
+### 4. Extract typed fields
 
 ```bash
 dragonfruitme extract --url https://example.org/expose/4711 --fields-json '[
@@ -53,7 +74,7 @@ dragonfruitme extract --url https://example.org/expose/4711 --fields-json '[
 
 Read `stage` and `attempts` to see how each value was found. Run the same command on another exposé of the same site: every field should now come from `stage: "recipe"`.
 
-### 4. Teach what the cheap stages missed
+### 5. Teach what the cheap stages missed
 
 If a field returns `NEEDS_AGENT`, read its `candidates`. If the value is there:
 
@@ -65,7 +86,7 @@ dragonfruitme extract --url https://example.org/expose/4711 --fields-json '[
 
 The value is accepted only if it occurs in the page, then compiled into a recipe.
 
-### 5. Inspect and reset recipes
+### 6. Inspect and reset recipes
 
 ```bash
 dragonfruitme recipes --scope example.org/expose/*

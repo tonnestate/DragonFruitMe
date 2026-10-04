@@ -51,6 +51,7 @@ class Link:
     internal: bool
     nofollow: bool
     block_id: int | None
+    rel: tuple[str, ...] = field(default_factory=tuple)
 
 
 @dataclass
@@ -343,13 +344,15 @@ class _GraphBuilder(HTMLParser):
             return
         absolute = urljoin(self._base, href)
         host = (urlsplit(absolute).hostname or "").lower()
+        rel = tuple(dict.fromkeys(part for part in link["rel"].split() if part))
         self.graph.links.append(
             Link(
                 href=absolute,
                 text=normalize_text("".join(link["buf"])),
                 internal=host == self._host,
-                nofollow="nofollow" in link["rel"],
+                nofollow="nofollow" in rel,
                 block_id=self._next_id,  # the block currently being filled
+                rel=rel,
             )
         )
 

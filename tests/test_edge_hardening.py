@@ -84,7 +84,7 @@ def test_accessible_name_is_not_promoted_to_field_label(tool):
     assert field["value"] is None
 
 
-def test_deeply_nested_but_same_component_remains_extractable(tool):
+def test_deeply_divergent_wrappers_fail_closed(tool):
     html = """<html><body><main>
     <div class="card">
       <div class="left"><div><span>Telefon</span></div></div>
@@ -99,5 +99,5 @@ def test_deeply_nested_but_same_component_remains_extractable(tool):
         render="never",
     )
     field = result["fields"][0]
-    assert field["status"] == "FOUND"
-    assert field["value"] == "+49 40 33333333"
+    assert field["status"] == "NEEDS_AGENT"
+    assert field["value"] is None

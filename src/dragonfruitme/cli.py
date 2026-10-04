@@ -111,6 +111,10 @@ def _batch_extract(args: argparse.Namespace, tool: DragonFruitMe) -> int:
         "errors": 0,
         "unconfirmed_fields": 0,
         "flagged_rows": 0,
+        "error_codes": {},
+        "field_statuses": {},
+        "stage_hits": {},
+        "signals": {},
     }
 
     try:
@@ -131,6 +135,9 @@ def _batch_extract(args: argparse.Namespace, tool: DragonFruitMe) -> int:
 
             if not result.get("ok"):
                 counts["errors"] += 1
+                error = result.get("error") or {}
+                code = str(error.get("code") or "UNKNOWN_ERROR")
+                counts["error_codes"][code] = counts["error_codes"].get(code, 0) + 1
                 continue
             status = str(result.get("status", "")).lower()
             if status in {"complete", "partial", "incomplete"}:
@@ -141,6 +148,16 @@ def _batch_extract(args: argparse.Namespace, tool: DragonFruitMe) -> int:
             counts["unconfirmed_fields"] += sum(1 for f in fields if f.get("status") == "UNCONFIRMED")
             if any(f.get("signals") for f in fields):
                 counts["flagged_rows"] += 1
+            for field in fields:
+                field_status = str(field.get("status") or "UNKNOWN")
+                counts["field_statuses"][field_status] = counts["field_statuses"].get(field_status, 0) + 1
+                stage = field.get("stage")
+                if stage:
+                    stage = str(stage)
+                    counts["stage_hits"][stage] = counts["stage_hits"].get(stage, 0) + 1
+                for signal in field.get("signals") or []:
+                    code = str(signal.get("code") or "UNKNOWN_SIGNAL")
+                    counts["signals"][code] = counts["signals"].get(code, 0) + 1
     finally:
         if close_stream:
             stream.close()

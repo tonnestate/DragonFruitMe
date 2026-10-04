@@ -66,7 +66,6 @@ class Block:
     row: int | None = None
     heading_level: int | None = None
     ancestry: tuple[int, ...] = field(default_factory=tuple, repr=False)
-    label_hints: tuple[str, ...] = field(default_factory=tuple, repr=False)
 
     def as_dict(self, max_chars: int | None = None) -> dict[str, Any]:
         text = self.text if max_chars is None or len(self.text) <= max_chars else self.text[:max_chars] + "…"
@@ -153,7 +152,6 @@ class _GraphBuilder(HTMLParser):
         self._next_id = 0
         self._container_counter = 0
         self._containers: list[tuple[str, int]] = []
-        self._container_label_hints: list[tuple[str, tuple[str, ...]]] = []
 
     # -- helpers -----------------------------------------------------------
     def _region(self) -> str:
@@ -185,12 +183,6 @@ class _GraphBuilder(HTMLParser):
             row=self._row if kind in {"td", "th"} else None,
             heading_level=level,
             ancestry=tuple(node_id for _, node_id in self._containers),
-            label_hints=tuple(dict.fromkeys(
-                hint
-                for _, hints in self._container_label_hints
-                for hint in hints
-                if hint
-            )),
         )
         self._next_id += 1
         self.graph.blocks.append(block)
@@ -264,12 +256,6 @@ class _GraphBuilder(HTMLParser):
         if tag in BOUNDARY_TAGS:
             self._container_counter += 1
             self._containers.append((tag, self._container_counter))
-            hints = tuple(
-                normalize_text(a.get(name, ""))
-                for name in ("aria-label", "data-label")
-                if normalize_text(a.get(name, ""))
-            )
-            self._container_label_hints.append((tag, hints))
         if tag in EMPHASIS_TAGS:
             self._emph_depth += 1
             self._emph_current = []
@@ -317,10 +303,6 @@ class _GraphBuilder(HTMLParser):
             for index in range(len(self._containers) - 1, -1, -1):
                 if self._containers[index][0] == tag:
                     del self._containers[index:]
-                    break
-            for index in range(len(self._container_label_hints) - 1, -1, -1):
-                if self._container_label_hints[index][0] == tag:
-                    del self._container_label_hints[index:]
                     break
         if tag == "tr":
             self._row = None

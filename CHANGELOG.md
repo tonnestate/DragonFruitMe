@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.1 — 2026-10-05
+
+Structural label resolution for modern component/CSS layouts.
+
+- page-graph blocks now retain an internal bounded DOM-container ancestry built during the existing one-pass stdlib HTML parse;
+- label extraction still prefers exact adjacent pairs and inline `Label: value`, but can now search a bounded eight-block neighbourhood when label and value sit in sibling wrappers with helper/decorative nodes between them;
+- structural fallback requires the candidate to remain in the same region and section and to share the component container with the label, preventing cross-card value theft;
+- typed validation remains authoritative, so a structurally nearby block cannot count unless it validates for the requested field type;
+- no new public operation, MCP tool, crawler frontier, CSS selector engine or runtime dependency;
+- regression tests cover nested DIV/CSS-style phone and e-mail layouts, cross-component isolation and unchanged classic `dt/dd` behavior.
+
 ## 0.3.0 — 2026-10-05
 
 Traversal awareness: enumeration can no longer mistake one visible level for whole-source coverage.

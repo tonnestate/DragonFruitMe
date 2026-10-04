@@ -132,3 +132,15 @@ def test_link_rel_metadata_is_retained_by_graph():
     link = graph.links[0]
     assert link.rel == ("next", "nofollow")
     assert link.nofollow is True
+
+
+def test_observe_exposes_traversal_without_new_agent_operation(tmp_path):
+    from dragonfruitme import DragonFruitMe
+
+    html = '<nav><a href="/directory?page=2" rel="next">2</a><a href="/directory?page=40">&gt;&gt;</a></nav>'
+    with DragonFruitMe(state_dir=tmp_path / "state") as tool:
+        result = tool.observe(html=html, base_url="https://example.org/directory?page=1")
+
+    assert result["ok"] is True
+    assert result["traversal"]["coverage_status"] == "INCOMPLETE"
+    assert result["traversal"]["pagination"]["last_page"] == 40

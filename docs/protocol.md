@@ -71,7 +71,7 @@ dragonfruitme extract-batch --urls-file FILE --fields-json JSON [--output OUT.js
 
 * Input: one URL per line (`#` comments allowed) or a JSON array; duplicates are removed, order is kept.
 * Output: one JSONL row per URL, `{"url": ..., <extract result>}`, flushed immediately; stdout if `--output` is omitted.
-* Summary on stderr: `{"ok": true, "batch": {total, skipped, attempted, complete, partial, incomplete, errors, unconfirmed_fields, flagged_rows}}`; `flagged_rows` counts rows with at least one field signal.
+* Summary on stderr: `{"ok": true, "batch": {total, skipped, attempted, complete, partial, incomplete, errors, unconfirmed_fields, flagged_rows, error_codes, field_statuses, stage_hits, signals}}`; `flagged_rows` counts rows with at least one field signal. The four maps aggregate error codes, field statuses, successful extraction stages and field signals across the attempted batch so production failure clusters are visible without changing the JSONL row contract.
 * `--resume` (requires `--output`): repairs a torn last line, skips URLs whose latest row is final (`ok: true` or `error.recoverable: false`), retries the rest. The latest row per URL is authoritative.
 * Exit code 0 unless `--fail-on-error` is set and at least one URL failed (then 2).
 

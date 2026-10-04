@@ -18,10 +18,11 @@ _tool = DragonFruitMe(policy=FetchPolicy.from_env())
 
 mcp = MCPServer(
     "DragonFruitMe",
-    description="Escalating web-to-graph extraction for AI agents: observe, locate, extract.",
+    description="Escalating web-to-graph extraction and traversal evidence for AI agents: observe, locate, extract.",
     instructions=(
         "DragonFruitMe exposes exactly three operations: observe, locate, extract. It contains no LLM. "
-        "observe returns a bounded page-graph overview. locate returns the most relevant blocks for a query, "
+        "observe returns a bounded page-graph overview plus traversal evidence: pagination, candidate child/detail "
+        "levels and conservative coverage status. A single page never proves source completeness. locate returns the most relevant blocks for a query, "
         "ranked by on-page signals. extract escalates per field: stored recipe -> structured data -> label "
         "heuristics -> optional rendering -> NEEDS_AGENT with bounded candidates. If a field comes back "
         "NEEDS_AGENT and you can read the value in the candidates, call extract again with that field's "
@@ -36,7 +37,7 @@ mcp = MCPServer(
 
 @mcp.tool()
 def observe(url: str | None = None, html: str | None = None, base_url: str | None = None) -> dict[str, Any]:
-    """Fetch (or take) a page and return a bounded page-graph overview: outline, links, structured data, render need."""
+    """Fetch (or take) a page and return page-graph plus traversal/coverage evidence."""
     return _tool.observe(url=url, html=html, base_url=base_url)
 
 

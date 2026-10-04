@@ -12,7 +12,7 @@
 <p align="center">
   <img alt="License" src="https://img.shields.io/badge/license-GPL--3.0-blue">
   <img alt="Status" src="https://img.shields.io/badge/status-experimental-orange">
-  <img alt="Version" src="https://img.shields.io/badge/version-0.1.0-ff2d8a">
+  <img alt="Version" src="https://img.shields.io/badge/version-0.1.1-ff2d8a">
   <img alt="Python" src="https://img.shields.io/badge/python-%3E%3D3.10-3776AB">
   <img alt="Dependencies" src="https://img.shields.io/badge/runtime%20deps-none-brightgreen">
   <img alt="MCP" src="https://img.shields.io/badge/MCP-optional-5b5bd6">
@@ -138,6 +138,21 @@ dragonfruitme forget --scope example.org/expose/*
 ```
 
 `--html-file page.html --base-url https://…` works everywhere instead of `--url` when the HTML is already in hand.
+
+
+### Large explicit URL sets
+
+For thousands of already-discovered URLs, do not make the agent write its own loop, temporary CSV shards or merge script. Use the host-side batch runner:
+
+```bash
+dragonfruitme extract-batch \
+  --urls-file urls.txt \
+  --fields-json '[{"name":"name","type":"text"},{"name":"phone","type":"phone"},{"name":"email","type":"email"}]' \
+  --output results.jsonl \
+  --resume
+```
+
+The input is either one URL per line or a JSON array. DragonFruitMe keeps one recipe store warm across the run, writes and flushes one JSONL record after every URL, skips already-written URLs on `--resume`, and continues after per-URL failures. This is deliberately **not** a crawler frontier: DragonFruitMe processes the explicit URL set it is given and does not invent discovery strategy.
 
 ### Python
 

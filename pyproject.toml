@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dragonfruitme"
-version = "0.1.0"
+version = "0.1.1"
 description = "Escalating web-to-graph extraction for AI agents: cheapest-first fetching, per-field escalation and compile-once recipes."
 readme = "README.md"
 requires-python = ">=3.10"

@@ -1,4 +1,4 @@
-# Architecture and Specification (v0.3)
+# Architecture and Specification (v0.3.1)
 
 DragonFruitMe has one job: give an AI agent precise, cheap and provable access to the content of web pages. It is built from three graphs and a recipe store.
 
@@ -38,7 +38,7 @@ Policy invariants (host-bound, never agent-supplied):
 Built with `html.parser` in one pass.
 
 * **Nodes:** page (title, lang, meta, canonical, feeds) · sections (heading hierarchy) · blocks · links.
-* **Block** = `id, kind, text, section path, region, weight, emphasis, row, heading_level`.
+* **Block** = `id, kind, text, section path, region, weight, emphasis, row, heading_level` plus an internal bounded container ancestry used only for structural neighbourhood checks.
 * **Block boundaries:** headings and block tags (`p li td th dt dd …`) open blocks; container tags (`div section table tr ul …`) flush them. Malformed HTML degrades into more, smaller blocks — never into lost text.
 * **Regions:** `main`, `header`, `nav`, `aside`, `footer` (nesting-aware).
 * **Weights (BM25F field weights):** H1 4.0 · H2 3.0 · H3 2.5 · H4–6 2.0 · body 1.0, multiplied by region (main 1.0, header 0.6, aside 0.5, nav/footer 0.3). Title weight 5.0 is applied as a page-level bonus. Emphasised tokens (`strong b em mark`) get a bonus.
@@ -84,9 +84,11 @@ Per field, in this order. A stage only counts when its candidate passes `validat
 |---|---|---|---|
 | 1 | `recipe` | stored recipe for `(scope, field)` | count hit |
 | 2 | `structured` | JSON-LD / embedded JSON / microdata / meta, by explicit `paths` first, then by alias = last key | compile `json` recipe |
-| 3 | `label` | exact label blocks (dt→dd, th→td same row, label→next block) first, then inline `Label: value`; main region first | compile `regex` (label-anchored) or `label` recipe |
+| 3 | `label` | exact label blocks (dt→dd, th→td same row, label→next block) first; then bounded structural sibling-wrapper neighbours inside the same component; then inline `Label: value`; main region first | compile `regex` (label-anchored) or `label` recipe |
 | 4 | `render` | re-run 1–3 on the rendered page | as above |
 | 5 | `agent` | — | `NEEDS_AGENT` with ≤3 ranked candidates |
+
+**Structural label fallback:** modern component layouts often place a short label and its value in sibling `div` wrappers with icon/help nodes between them. DragonFruitMe keeps the normal adjacent rule first, then inspects at most eight following blocks. A candidate must remain in the same section and region and share the label's immediate component ancestry; typed validation still decides whether it can count. This is deterministic neighbourhood reasoning, not CSS/XPath execution.
 
 Render policy: `auto` renders only if a field is unresolved **and** the page is a JS shell; `on_miss` renders whenever a field is unresolved; `never` never renders. Missing browser support is recorded as an attempt (`UNAVAILABLE`), not raised.
 

@@ -65,6 +65,7 @@ class Block:
     emphasis: list[str] = field(default_factory=list)
     row: int | None = None
     heading_level: int | None = None
+    ancestry: tuple[int, ...] = field(default_factory=tuple, repr=False)
 
     def as_dict(self, max_chars: int | None = None) -> dict[str, Any]:
         text = self.text if max_chars is None or len(self.text) <= max_chars else self.text[:max_chars] + "…"
@@ -149,6 +150,8 @@ class _GraphBuilder(HTMLParser):
         self._row: int | None = None
         self._itemprop_stack: list[tuple[str, str, list[str]]] = []
         self._next_id = 0
+        self._container_counter = 0
+        self._containers: list[tuple[str, int]] = []
 
     # -- helpers -----------------------------------------------------------
     def _region(self) -> str:
@@ -179,6 +182,7 @@ class _GraphBuilder(HTMLParser):
             emphasis=emphasis,
             row=self._row if kind in {"td", "th"} else None,
             heading_level=level,
+            ancestry=tuple(node_id for _, node_id in self._containers),
         )
         self._next_id += 1
         self.graph.blocks.append(block)
@@ -249,6 +253,9 @@ class _GraphBuilder(HTMLParser):
             self._buf_kind = tag
         elif tag in BOUNDARY_TAGS:
             self._flush()
+        if tag in BOUNDARY_TAGS:
+            self._container_counter += 1
+            self._containers.append((tag, self._container_counter))
         if tag in EMPHASIS_TAGS:
             self._emph_depth += 1
             self._emph_current = []
@@ -292,6 +299,11 @@ class _GraphBuilder(HTMLParser):
             self._finish_link()
         if tag in HEADINGS or tag in BLOCK_TAGS or tag in BOUNDARY_TAGS:
             self._flush()
+        if tag in BOUNDARY_TAGS:
+            for index in range(len(self._containers) - 1, -1, -1):
+                if self._containers[index][0] == tag:
+                    del self._containers[index:]
+                    break
         if tag == "tr":
             self._row = None
         if tag in REGIONS and self._region_depth[tag] > 0:

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.1.1 — 2026-10-04
+
+Progress-preserving batch extraction for large explicit URL sets.
+
+- new host-side CLI command `extract-batch`; the public agent surface remains `observe`, `locate`, `extract`;
+- accepts newline-delimited URL files or JSON arrays and de-duplicates while preserving order;
+- reuses one DragonFruitMe instance and one recipe store across the entire batch, so early pages teach recipes that later pages reuse;
+- writes one JSONL record per URL and flushes immediately, preserving completed work if the process is interrupted;
+- `--resume` appends to an existing JSONL file and skips URLs already durably written;
+- per-URL failures do not stop the batch by default; `--fail-on-error` restores fail-fast workflow semantics;
+- no crawler frontier, search engine, planner or new MCP tool was added.
+
 ## 0.1.0 — 2026-10-04
 
 Initial DragonFruitMe foundation, modelled on BananaMe's repository and interface discipline.

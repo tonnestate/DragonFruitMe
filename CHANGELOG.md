@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.4.3 — 2026-10-05
+
+High-fanout source expansion: stop treating external search as the enumeration loop when a productive directory/listing source has already been found.
+
+- add host-side `expand-source` CLI and `DragonFruitMe.expand_source()` helper; the public agent surface remains `observe → locate → extract`;
+- bounded pagination is materialized from the detected template in one deterministic frontier instead of rediscovering one page at a time;
+- repeated `detail_candidates` are materialized as complete detail-URL queues without fetching those detail pages during expansion;
+- repeated `child_candidates` can be followed to lower listing levels up to a host-owned depth budget;
+- detail URLs are de-duplicated across listing pages and seeds;
+- host-owned `max_pages`, `max_urls` and `max_depth` budgets prevent uncontrolled crawling; hitting a budget never claims completeness;
+- agent-facing `observe.traversal` remains bounded to samples, while the host-side frontier can retain every visible candidate URL;
+- source expansion reports fan-out, errors, remaining frontier and whether the frontier was actually exhausted;
+- regression tests cover bounded pagination, de-duplication, hard page budgets and CLI materialization.
+
 ## 0.4.2 — 2026-10-05
 
 Batch sanity feedback: measure unusual outcomes and ask the caller to confirm strategy without taking control away from it.

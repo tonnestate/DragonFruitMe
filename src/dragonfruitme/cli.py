@@ -9,6 +9,12 @@ from .core import DragonFruitMe
 from .policy import FetchPolicy
 
 
+ADVISORY_MIN_ROWS = 10
+ADVISORY_LOW_YIELD_MAX = 0.10
+ADVISORY_HIGH_AGENT_MIN = 0.80
+ADVISORY_MAX_FIELDS = 5
+
+
 def _json(value: str):
     return json.loads(value)
 
@@ -84,6 +90,88 @@ def _ensure_line_boundary(path: Path) -> None:
             handle.write(b"\n")
 
 
+def _batch_advisories(counts: dict) -> list[dict]:
+    """Derive non-blocking sanity feedback from aggregate batch observations.
+
+    Advisories deliberately describe *what* looks unusual, never *why*. They
+    do not stop execution, change exit codes, or make domain assumptions.
+    """
+    advisories: list[dict] = []
+    total = int(counts.get("total") or 0)
+    attempted = int(counts.get("attempted") or 0)
+
+    if total == 0:
+        advisories.append({
+            "code": "EMPTY_INPUT_SET",
+            "severity": "info",
+            "message": "No URLs were supplied to the batch.",
+            "evidence": {"total": 0},
+            "next": "Confirm that an empty explicit URL set is intended before treating the task as complete.",
+        })
+        return advisories
+
+    if attempted >= ADVISORY_MIN_ROWS:
+        usable = int(counts.get("complete") or 0) + int(counts.get("partial") or 0)
+        usable_ratio = usable / attempted
+        if usable_ratio <= ADVISORY_LOW_YIELD_MAX:
+            advisories.append({
+                "code": "LOW_BATCH_YIELD",
+                "severity": "warning",
+                "message": "Very few attempted URLs produced any found fields.",
+                "evidence": {
+                    "attempted": attempted,
+                    "usable_rows": usable,
+                    "usable_ratio": round(usable_ratio, 4),
+                    "errors": int(counts.get("errors") or 0),
+                    "incomplete": int(counts.get("incomplete") or 0),
+                },
+                "next": "Confirm that this input segment, source selection and requested fields still match the intended task before continuing unchanged.",
+            })
+
+    field_statuses = counts.get("field_statuses") or {}
+    field_observations = sum(int(value or 0) for value in field_statuses.values())
+    needs_agent = int(field_statuses.get("NEEDS_AGENT") or 0)
+    if field_observations >= ADVISORY_MIN_ROWS:
+        agent_ratio = needs_agent / field_observations
+        if agent_ratio >= ADVISORY_HIGH_AGENT_MIN:
+            advisories.append({
+                "code": "HIGH_AGENT_ESCALATION",
+                "severity": "warning",
+                "message": "Most observed fields escalated to NEEDS_AGENT instead of being extracted deterministically.",
+                "evidence": {
+                    "field_observations": field_observations,
+                    "needs_agent": needs_agent,
+                    "needs_agent_ratio": round(agent_ratio, 4),
+                },
+                "next": "Confirm that the requested fields, aliases and source structure are appropriate, or that this level of agent escalation is expected.",
+            })
+
+    gaps: list[dict] = []
+    field_outcomes = counts.get("field_outcomes") or {}
+    for name, statuses in sorted(field_outcomes.items()):
+        observations = sum(int(value or 0) for value in statuses.values())
+        found = int(statuses.get("FOUND") or 0)
+        if observations >= ADVISORY_MIN_ROWS and found == 0:
+            gaps.append({
+                "field": name,
+                "observations": observations,
+                "statuses": dict(sorted(statuses.items())),
+            })
+    if gaps:
+        advisories.append({
+            "code": "SYSTEMATIC_FIELD_GAPS",
+            "severity": "warning",
+            "message": "One or more requested fields were never found across a meaningful number of observations.",
+            "evidence": {
+                "fields": gaps[:ADVISORY_MAX_FIELDS],
+                "omitted_fields": max(0, len(gaps) - ADVISORY_MAX_FIELDS),
+            },
+            "next": "Confirm whether these fields are expected to exist in this source segment before continuing unchanged.",
+        })
+
+    return advisories
+
+
 def _batch_extract(args: argparse.Namespace, tool: DragonFruitMe) -> int:
     """Process an explicit URL set without turning the agent into a loop/merge engine."""
     urls = _read_urls(args.urls_file)
@@ -115,6 +203,7 @@ def _batch_extract(args: argparse.Namespace, tool: DragonFruitMe) -> int:
         "field_statuses": {},
         "stage_hits": {},
         "signals": {},
+        "field_outcomes": {},
     }
 
     try:
@@ -151,6 +240,9 @@ def _batch_extract(args: argparse.Namespace, tool: DragonFruitMe) -> int:
             for field in fields:
                 field_status = str(field.get("status") or "UNKNOWN")
                 counts["field_statuses"][field_status] = counts["field_statuses"].get(field_status, 0) + 1
+                field_name = str(field.get("name") or "UNKNOWN")
+                field_bucket = counts["field_outcomes"].setdefault(field_name, {})
+                field_bucket[field_status] = field_bucket.get(field_status, 0) + 1
                 stage = field.get("stage")
                 if stage:
                     stage = str(stage)
@@ -162,6 +254,7 @@ def _batch_extract(args: argparse.Namespace, tool: DragonFruitMe) -> int:
         if close_stream:
             stream.close()
 
+    counts["advisories"] = _batch_advisories(counts)
     summary = {"ok": True, "batch": counts}
     sys.stderr.write(json.dumps(summary, ensure_ascii=False, separators=(",", ":")) + "\n")
     if args.fail_on_error and counts["errors"]:

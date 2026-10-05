@@ -37,7 +37,7 @@ def test_min_provenance_gates_agent_claims(tool):
     assert bad["error"]["code"] == "FIELD_INVALID"
 
 
-def test_recipe_contradicted_by_independent_stage_is_discarded_and_relearned(tool):
+def test_contradicted_primary_is_discarded_and_proven_fallback_answers(tool):
     # page 1: markup-anchored recipe (no usable label for the value's container)
     page1 = """<html><body><main><div class="teaser"><span class="v">199.000 €</span></div>
     <h2>Objekt</h2><dl><dt>Kaufpreis</dt><dd>349.000 €</dd></dl></main></body></html>"""
@@ -51,11 +51,27 @@ def test_recipe_contradicted_by_independent_stage_is_discarded_and_relearned(too
     page2 = page1.replace("349.000", "415.000").replace("199.000", "205.000")
     second = tool.extract(fields=[{"name": "kaufpreis", "type": "price"}], html=page2, base_url=BASE.format(id="2"))
     f = field(second)
-    assert f["normalized"] == 415000.0 and f["stage"] == "label"
+    assert f["normalized"] == 415000.0
     recipe_attempt = f["attempts"][0]
     assert recipe_attempt["outcome"] == "MISS" and recipe_attempt["reason"] == "CONTRADICTED"
-    assert recipe_attempt["recipe_value"] == "205.000 €"
-    assert f["recipe"]["compiled"]  # relearned from the label stage
+    assert recipe_attempt["recipe_value"] == "205.000 €" and recipe_attempt["role"] == "primary"
+    # the displaced recipe from page 1 was kept as a fallback and answers without re-escalation
+    assert f["stage"] == "recipe" and f["attempts"][1] == {
+        "stage": "recipe", "page": "inline", "outcome": "HIT", "kind": "regex", "role": "fallback"}
+    assert {"code": "RECIPE_FALLBACK", "role": "fallback", "kind": "regex", "promoted": False} in f["signals"]
+
+
+def test_contradicted_recipe_without_alternatives_escalates_and_relearns(tool):
+    from dragonfruitme.recipes import Recipe
+
+    tool.engine.store.put(Recipe(scope="makler.example/expose/*", field="kaufpreis", kind="regex",
+                                 pattern=r'<span class="v">\s*([^<]+?)(?=\s*<)', origin="label"))
+    page = """<html><body><main><div class="teaser"><span class="v">205.000 €</span></div>
+    <h2>Objekt</h2><dl><dt>Kaufpreis</dt><dd>415.000 €</dd></dl></main></body></html>"""
+    f = field(tool.extract(fields=[{"name": "kaufpreis", "type": "price"}], html=page, base_url=BASE.format(id="2")))
+    assert f["normalized"] == 415000.0 and f["stage"] == "label"
+    assert f["attempts"][0]["reason"] == "CONTRADICTED"
+    assert f["recipe"]["compiled"] and f["recipe"]["role"] == "candidate"  # relearned, waits to prove itself
 
 
 def test_repeated_unconfirmed_value_is_flagged(tool):

@@ -33,8 +33,25 @@ STALE_AFTER_MISSES = 2
 _DIGIT_RUN = re.compile(r"\d{3,}")
 
 
+ROLES = ("primary", "fallback", "candidate", "retired")
+LIVE_ROLES = ("primary", "fallback", "candidate")
+MAX_LIVE = 4            # primary + up to three alternatives per (scope, field)
+PROMOTE_MIN_HITS = 2    # an alternative must have proven itself at least twice
+KIND_PRIOR = {"json": 3, "regex": 2, "label": 1}  # tie-break only, never overrides evidence
+SCHEMA_VERSION = 2
+_COLUMNS = ("id, scope, field, kind, pattern, origin, role, hits, misses, total_misses, "
+            "contradictions, confirmed_hits, last_validated")
+
+
 @dataclass
 class Recipe:
+    """One deterministic way to find a field on pages of one scope.
+
+    ``misses`` counts consecutive misses (reset by a hit); ``total_misses``,
+    ``contradictions`` and ``confirmed_hits`` are lifetime evidence used to
+    rank alternatives.
+    """
+
     scope: str
     field: str
     kind: str
@@ -42,28 +59,66 @@ class Recipe:
     origin: str
     hits: int = 0
     misses: int = 0
-    status: str = "active"
+    role: str = "primary"
+    id: int | None = None
+    total_misses: int = 0
+    contradictions: int = 0
+    confirmed_hits: int = 0
+    last_validated: float | None = None
+
+    @property
+    def status(self) -> str:
+        if self.role == "retired":
+            return "retired"
+        return "stale" if self.misses >= STALE_AFTER_MISSES else "active"
+
+    def score(self) -> float:
+        """Laplace-smoothed reliability; contradictions weigh double."""
+        return (self.hits + 1) / (self.hits + self.total_misses + 2 * self.contradictions + 2)
+
+    def sort_key(self) -> tuple[float, int, int]:
+        return (-self.score(), -KIND_PRIOR.get(self.kind, 0), self.id or 0)
+
+    @classmethod
+    def from_row(cls, row: tuple[Any, ...]) -> "Recipe":
+        (rid, scope, field, kind, pattern, origin, role, hits, misses, total_misses,
+         contradictions, confirmed_hits, last_validated) = row
+        return cls(scope=scope, field=field, kind=kind, pattern=pattern, origin=origin, hits=hits, misses=misses,
+                   role=role, id=rid, total_misses=total_misses, contradictions=contradictions,
+                   confirmed_hits=confirmed_hits, last_validated=last_validated)
 
     def as_dict(self) -> dict[str, Any]:
         return {
+            "id": self.id,
             "scope": self.scope,
             "field": self.field,
+            "role": self.role,
             "kind": self.kind,
             "pattern": self.pattern,
             "origin": self.origin,
             "hits": self.hits,
             "misses": self.misses,
+            "total_misses": self.total_misses,
+            "contradictions": self.contradictions,
+            "confirmed_hits": self.confirmed_hits,
+            "last_validated": self.last_validated,
+            "score": round(self.score(), 4),
             "status": self.status,
         }
 
 
 class RecipeStore:
-    """SQLite-backed recipe and observation store.
+    """SQLite-backed recipe portfolio and observation store.
 
-    One connection per store (WAL journal, ``synchronous=NORMAL``) instead of a
-    connection per call. Writes are grouped with :meth:`transaction`; the
-    extractor commits once per page and stage group rather than once per field
-    and operation. A crash can lose at most the counters of the page being
+    Each ``(scope, field)`` keeps a small portfolio: one ``primary`` recipe,
+    proven ``fallback`` recipes and new ``candidate`` recipes (at most
+    ``MAX_LIVE`` live ones; the weakest alternative is ``retired`` beyond that).
+    A newly compiled recipe never overwrites a working primary - it joins as a
+    candidate and has to prove itself when the primary actually fails.
+
+    One connection per store (WAL journal, ``synchronous=NORMAL``). Writes are
+    grouped with :meth:`transaction`; the extractor commits once per page and
+    stage group. A crash can lose at most the counters of the page being
     processed, never a previously committed recipe.
     """
 
@@ -77,37 +132,66 @@ class RecipeStore:
         self._finalizer = weakref.finalize(self, self._db.close)
         self._db.execute("PRAGMA journal_mode=WAL")
         self._db.execute("PRAGMA synchronous=NORMAL")
-        with self._connect() as db:
+        with self.transaction() as db:
+            self._migrate(db)
+
+    # -- schema --------------------------------------------------------------
+    @staticmethod
+    def _migrate(db: sqlite3.Connection) -> None:
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS recipe_set (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                scope TEXT NOT NULL,
+                field TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                pattern TEXT NOT NULL,
+                origin TEXT NOT NULL,
+                role TEXT NOT NULL,
+                hits INTEGER NOT NULL DEFAULT 0,
+                misses INTEGER NOT NULL DEFAULT 0,
+                total_misses INTEGER NOT NULL DEFAULT 0,
+                contradictions INTEGER NOT NULL DEFAULT 0,
+                confirmed_hits INTEGER NOT NULL DEFAULT 0,
+                last_validated REAL,
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL,
+                UNIQUE (scope, field, kind, pattern)
+            )
+            """
+        )
+        db.execute("CREATE INDEX IF NOT EXISTS recipe_set_scope_field ON recipe_set (scope, field)")
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS observations (
+                scope TEXT NOT NULL,
+                field TEXT NOT NULL,
+                last_url TEXT NOT NULL,
+                last_value TEXT NOT NULL,
+                streak INTEGER NOT NULL DEFAULT 1,
+                updated_at REAL NOT NULL,
+                PRIMARY KEY (scope, field)
+            )
+            """
+        )
+        version = db.execute("PRAGMA user_version").fetchone()[0]
+        if version >= SCHEMA_VERSION:
+            return
+        legacy = db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='recipes'").fetchone()
+        if legacy:
+            # v0.1-v0.3: one recipe per (scope, field) -> becomes that field's primary
             db.execute(
                 """
-                CREATE TABLE IF NOT EXISTS recipes (
-                    scope TEXT NOT NULL,
-                    field TEXT NOT NULL,
-                    kind TEXT NOT NULL,
-                    pattern TEXT NOT NULL,
-                    origin TEXT NOT NULL,
-                    hits INTEGER NOT NULL DEFAULT 0,
-                    misses INTEGER NOT NULL DEFAULT 0,
-                    status TEXT NOT NULL DEFAULT 'active',
-                    created_at REAL NOT NULL,
-                    updated_at REAL NOT NULL,
-                    PRIMARY KEY (scope, field)
-                )
+                INSERT OR IGNORE INTO recipe_set
+                    (scope, field, kind, pattern, origin, role, hits, misses, total_misses,
+                     contradictions, confirmed_hits, last_validated, created_at, updated_at)
+                SELECT scope, field, kind, pattern, origin, 'primary', hits, misses, misses,
+                       0, 0, NULL, created_at, updated_at
+                FROM recipes
                 """
             )
-            db.execute(
-                """
-                CREATE TABLE IF NOT EXISTS observations (
-                    scope TEXT NOT NULL,
-                    field TEXT NOT NULL,
-                    last_url TEXT NOT NULL,
-                    last_value TEXT NOT NULL,
-                    streak INTEGER NOT NULL DEFAULT 1,
-                    updated_at REAL NOT NULL,
-                    PRIMARY KEY (scope, field)
-                )
-                """
-            )
+            db.execute("DROP TABLE recipes")
+        db.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
 
     @contextmanager
     def transaction(self) -> Iterator[sqlite3.Connection]:
@@ -138,44 +222,161 @@ class RecipeStore:
     def close(self) -> None:
         self._finalizer()
 
-    def get(self, scope: str, field: str) -> Recipe | None:
+    # -- reads ---------------------------------------------------------------
+    def recipe_set(self, scope: str, field: str) -> list[Recipe]:
+        """Live recipes in execution order: primary first, then alternatives by evidence."""
         with self._connect() as db:
-            row = db.execute(
-                "SELECT scope, field, kind, pattern, origin, hits, misses, status FROM recipes WHERE scope=? AND field=?",
+            rows = db.execute(
+                f"SELECT {_COLUMNS} FROM recipe_set WHERE scope=? AND field=? AND role!='retired'",
                 (scope, field),
-            ).fetchone()
-        return Recipe(*row) if row else None
+            ).fetchall()
+        recipes = [Recipe.from_row(row) for row in rows]
+        recipes.sort(key=lambda r: (r.role != "primary", *r.sort_key()))
+        return recipes
+
+    def get(self, scope: str, field: str) -> Recipe | None:
+        """The primary recipe of a field, if any."""
+        for recipe in self.recipe_set(scope, field):
+            if recipe.role == "primary":
+                return recipe
+        return None
+
+    def list(self, scope: str | None = None, include_retired: bool = True) -> list[Recipe]:
+        query = f"SELECT {_COLUMNS} FROM recipe_set"
+        clauses: list[str] = []
+        args: list[Any] = []
+        if scope:
+            clauses.append("scope=?")
+            args.append(scope)
+        if not include_retired:
+            clauses.append("role!='retired'")
+        if clauses:
+            query += " WHERE " + " AND ".join(clauses)
+        with self._connect() as db:
+            recipes = [Recipe.from_row(row) for row in db.execute(query, args).fetchall()]
+        order = {role: i for i, role in enumerate(ROLES)}
+        recipes.sort(key=lambda r: (r.scope, r.field, order.get(r.role, 9), *r.sort_key()))
+        return recipes
+
+    # -- writes --------------------------------------------------------------
+    def _find(self, db: sqlite3.Connection, recipe: Recipe) -> Recipe | None:
+        row = db.execute(
+            f"SELECT {_COLUMNS} FROM recipe_set WHERE scope=? AND field=? AND kind=? AND pattern=?",
+            (recipe.scope, recipe.field, recipe.kind, recipe.pattern),
+        ).fetchone()
+        return Recipe.from_row(row) if row else None
+
+    def _has_primary(self, db: sqlite3.Connection, scope: str, field: str) -> bool:
+        return db.execute(
+            "SELECT 1 FROM recipe_set WHERE scope=? AND field=? AND role='primary'", (scope, field)
+        ).fetchone() is not None
+
+    def _insert(self, db: sqlite3.Connection, recipe: Recipe, role: str, hits: int) -> int:
+        now = time.time()
+        cur = db.execute(
+            """
+            INSERT INTO recipe_set (scope, field, kind, pattern, origin, role, hits, misses, total_misses,
+                                    contradictions, confirmed_hits, last_validated, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0, ?, ?, ?)
+            """,
+            (recipe.scope, recipe.field, recipe.kind, recipe.pattern, recipe.origin, role, hits,
+             now if hits else None, now, now),
+        )
+        return int(cur.lastrowid)
+
+    def _enforce_cap(self, db: sqlite3.Connection, scope: str, field: str) -> None:
+        rows = db.execute(
+            f"SELECT {_COLUMNS} FROM recipe_set WHERE scope=? AND field=? AND role IN ('fallback','candidate')",
+            (scope, field),
+        ).fetchall()
+        alternatives = sorted((Recipe.from_row(r) for r in rows), key=lambda r: r.sort_key())
+        excess = len(alternatives) - (MAX_LIVE - 1)
+        for weakest in alternatives[::-1][:max(0, excess)]:
+            db.execute("UPDATE recipe_set SET role='retired', updated_at=? WHERE id=?", (time.time(), weakest.id))
+
+    def add(self, recipe: Recipe) -> tuple[Recipe, bool]:
+        """Add a freshly compiled, already validated recipe to the portfolio.
+
+        Returns ``(recipe, created)``. The first recipe of a field becomes its
+        primary; later ones join as candidates and never displace a working
+        primary. The page that produced the recipe counts as its first hit.
+        """
+        with self._connect() as db:
+            existing = self._find(db, recipe)
+            if existing is not None:
+                if existing.role == "retired":
+                    db.execute("UPDATE recipe_set SET role='candidate', misses=0, updated_at=? WHERE id=?",
+                               (time.time(), existing.id))
+                    self._enforce_cap(db, recipe.scope, recipe.field)
+                    existing = self._find(db, recipe)
+                return existing, False
+            role = "candidate" if self._has_primary(db, recipe.scope, recipe.field) else "primary"
+            self._insert(db, recipe, role, hits=1)
+            self._enforce_cap(db, recipe.scope, recipe.field)
+            return self._find(db, recipe), True
 
     def put(self, recipe: Recipe) -> None:
-        now = time.time()
+        """Install a recipe as the primary (host/maintenance use).
+
+        The previous primary is kept as a fallback, not deleted.
+        """
         with self._connect() as db:
+            now = time.time()
+            db.execute("UPDATE recipe_set SET role='fallback', updated_at=? WHERE scope=? AND field=? AND role='primary'",
+                       (now, recipe.scope, recipe.field))
+            existing = self._find(db, recipe)
+            if existing is None:
+                self._insert(db, recipe, "primary", hits=0)
+            else:
+                db.execute("UPDATE recipe_set SET role='primary', origin=?, misses=0, updated_at=? WHERE id=?",
+                           (recipe.origin, now, existing.id))
+            self._enforce_cap(db, recipe.scope, recipe.field)
+
+    def record_hit(self, recipe_id: int, *, confirmed: bool = False) -> None:
+        with self._connect() as db:
+            now = time.time()
             db.execute(
-                """
-                INSERT INTO recipes (scope, field, kind, pattern, origin, hits, misses, status, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, 0, 0, 'active', ?, ?)
-                ON CONFLICT(scope, field) DO UPDATE SET
-                    kind=excluded.kind, pattern=excluded.pattern, origin=excluded.origin,
-                    hits=0, misses=0, status='active', updated_at=excluded.updated_at
-                """,
-                (recipe.scope, recipe.field, recipe.kind, recipe.pattern, recipe.origin, now, now),
+                "UPDATE recipe_set SET hits=hits+1, misses=0, confirmed_hits=confirmed_hits+?, "
+                "last_validated=?, updated_at=? WHERE id=?",
+                (1 if confirmed else 0, now, now, recipe_id),
             )
 
-    def record(self, scope: str, field: str, ok: bool) -> str:
-        """Count a hit or miss and return the resulting status."""
+    def record_miss(self, recipe_id: int, *, contradicted: bool = False) -> None:
         with self._connect() as db:
+            db.execute(
+                "UPDATE recipe_set SET misses=misses+1, total_misses=total_misses+1, "
+                "contradictions=contradictions+?, updated_at=? WHERE id=?",
+                (1 if contradicted else 0, time.time(), recipe_id),
+            )
+
+    def promote(self, scope: str, field: str, recipe_id: int) -> None:
+        """Make ``recipe_id`` the primary; the old primary becomes a fallback."""
+        with self._connect() as db:
+            now = time.time()
+            db.execute("UPDATE recipe_set SET role='fallback', updated_at=? WHERE scope=? AND field=? AND role='primary'",
+                       (now, scope, field))
+            db.execute("UPDATE recipe_set SET role='primary', updated_at=? WHERE id=?", (now, recipe_id))
+            # a candidate that answered when needed has proven itself: other candidates stay candidates
+            self._enforce_cap(db, scope, field)
+
+    def mark_fallback(self, recipe_id: int) -> None:
+        """A candidate that answered when the primary failed is a proven fallback."""
+        with self._connect() as db:
+            db.execute("UPDATE recipe_set SET role='fallback', updated_at=? WHERE id=? AND role='candidate'",
+                       (time.time(), recipe_id))
+
+    def record(self, scope: str, field: str, ok: bool) -> str:
+        """Compatibility helper: count a hit or miss on the primary and return its status."""
+        primary = self.get(scope, field)
+        if primary is None or primary.id is None:
+            return "missing"
+        with self._connect():
             if ok:
-                db.execute(
-                    "UPDATE recipes SET hits=hits+1, misses=0, status='active', updated_at=? WHERE scope=? AND field=?",
-                    (time.time(), scope, field),
-                )
+                self.record_hit(primary.id)
             else:
-                db.execute(
-                    "UPDATE recipes SET misses=misses+1, status=CASE WHEN misses+1>=? THEN 'stale' ELSE status END, updated_at=? "
-                    "WHERE scope=? AND field=?",
-                    (STALE_AFTER_MISSES, time.time(), scope, field),
-                )
-            row = db.execute("SELECT status FROM recipes WHERE scope=? AND field=?", (scope, field)).fetchone()
-        return row[0] if row else "missing"
+                self.record_miss(primary.id)
+        updated = self.get(scope, field)
+        return updated.status if updated else "missing"
 
     def observe(self, scope: str, field: str, url: str, value: str) -> int:
         """Record a found value and return how many *different* consecutive URLs
@@ -207,23 +408,13 @@ class RecipeStore:
             )
         return streak
 
-    def list(self, scope: str | None = None) -> list[Recipe]:
-        query = "SELECT scope, field, kind, pattern, origin, hits, misses, status FROM recipes"
-        args: tuple[Any, ...] = ()
-        if scope:
-            query += " WHERE scope=?"
-            args = (scope,)
-        query += " ORDER BY scope, field"
-        with self._connect() as db:
-            return [Recipe(*row) for row in db.execute(query, args).fetchall()]
-
     def forget(self, scope: str, field: str | None = None) -> int:
         with self._connect() as db:
             if field is None:
-                cur = db.execute("DELETE FROM recipes WHERE scope=?", (scope,))
+                cur = db.execute("DELETE FROM recipe_set WHERE scope=?", (scope,))
                 db.execute("DELETE FROM observations WHERE scope=?", (scope,))
             else:
-                cur = db.execute("DELETE FROM recipes WHERE scope=? AND field=?", (scope, field))
+                cur = db.execute("DELETE FROM recipe_set WHERE scope=? AND field=?", (scope, field))
                 db.execute("DELETE FROM observations WHERE scope=? AND field=?", (scope, field))
             return cur.rowcount
 

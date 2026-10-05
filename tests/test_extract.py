@@ -46,7 +46,7 @@ def test_second_page_of_same_template_is_served_by_recipes(tool):
     assert f["baujahr"]["normalized"] == 2011
     assert stages(f["kaufpreis"]) == [("recipe", "HIT")]
     recipes = {r["field"]: r for r in tool.recipes()["recipes"]}
-    assert recipes["kaufpreis"]["hits"] == 1
+    assert recipes["kaufpreis"]["hits"] == 2  # learning page + this page
 
 
 def test_recipe_drift_escalates_and_self_heals(tool):
@@ -68,7 +68,7 @@ def test_structured_paths_win_and_compile_json_recipes(tool):
     result = tool.extract(fields=fields, html=expose(), base_url=BASE.format(id="1"))
     preis = result["fields"][0]
     assert preis["stage"] == "structured" and preis["normalized"] == 349000.0
-    assert preis["recipe"] == {"kind": "json", "pattern": "jsonld|offers.price", "scope": "makler.example/expose/*", "compiled": True}
+    assert preis["recipe"] == {"kind": "json", "pattern": "jsonld|offers.price", "scope": "makler.example/expose/*", "compiled": True, "role": "primary"}
     page2 = expose(ld_price="199000", price="199.000 €")
     assert tool.extract(fields=fields, html=page2, base_url=BASE.format(id="2"))["fields"][0]["normalized"] == 199000.0
 

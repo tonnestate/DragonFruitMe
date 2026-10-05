@@ -12,7 +12,7 @@
 <p align="center">
   <img alt="License" src="https://img.shields.io/badge/license-GPL--3.0-blue">
   <img alt="Status" src="https://img.shields.io/badge/status-experimental-orange">
-  <img alt="Version" src="https://img.shields.io/badge/version-0.3.2-ff2d8a">
+  <img alt="Version" src="https://img.shields.io/badge/version-0.4.0-ff2d8a">
   <img alt="Python" src="https://img.shields.io/badge/python-%3E%3D3.10-3776AB">
   <img alt="Dependencies" src="https://img.shields.io/badge/runtime%20deps-none-brightgreen">
   <img alt="MCP" src="https://img.shields.io/badge/MCP-optional-5b5bd6">
@@ -99,7 +99,19 @@ The coverage rule is intentionally fail-closed:
 | `regex` | label/taught hit, anchored at the **visible label** | `Kaufpreis</dt><dd\s*class="price"\s*data\-id="\d+">\s*(<typed price>)` |
 | `label` | label text when no stable regex exists | `Kaufpreis` |
 
-On the next page of the same template, stage 1 answers in microseconds. If the site is redesigned, the recipe misses, the field escalates, a new recipe is compiled — **self-healing without an LLM in the loop**.
+On the next page of the same template, stage 1 answers in microseconds.
+
+**A portfolio, not a single winner.** Each field keeps up to four recipes per scope: one `primary`, plus `fallback` and `candidate` alternatives. A newly compiled recipe never overwrites a working primary — one odd page (say, a new-build project exposé on the usual URL template) joins as a candidate instead of replacing a recipe that worked 500 times.
+
+```text
+primary hit                      → done (alternatives are not even tried)
+primary miss / contradicted      → try alternatives by evidence → hit = RECIPE_FALLBACK signal
+primary stale (2 misses in a row)
+  + alternative proven ≥ 2 times → alternative promoted, old primary kept as fallback
+nothing answers                  → escalate, compile a new candidate
+```
+
+Alternatives are ranked by their own track record (hits, misses, contradictions), not by a fixed kind order. A fallback answer is always visible as `RECIPE_FALLBACK`, so a site redesign cannot hide behind a silent fallback. A healthy primary costs the same as before (benchmark: within noise of v0.3.2). The result is **self-healing without an LLM in the loop — and without forgetting what worked**.
 
 **Teach, but grounded.** If every cheap stage fails, the agent gets `NEEDS_AGENT` with a few ranked candidate blocks. If it can read the value there, it calls `extract` again with `"teach": "<exact value>"`. DragonFruitMe accepts the value only if it **occurs in the page** (`NOT_GROUNDED` otherwise), then compiles it like any other hit. The LLM is the last resort *and* a one-time teacher, never the per-page extractor.
 
@@ -126,9 +138,9 @@ An agent can never raise the provenance of its own claim; only independent stage
 
 ---
 
-## What DragonFruitMe v0.3.2 can do today
+## What DragonFruitMe v0.4.0 can do today
 
-| Capability | v0.3.2 behavior |
+| Capability | v0.4.0 behavior |
 |---|---|
 | Fetch ladder | Inline HTML → stdlib HTTP (gzip/deflate, charset detection) → optional Playwright rendering. |
 | Polite by default | Honest User-Agent, robots.txt honoured, per-host minimum interval, response size cap, page cache (observe + locate + extract = one request). |
@@ -140,12 +152,13 @@ An agent can never raise the provenance of its own claim; only independent stage
 | Structured data | JSON-LD (incl. `@graph`), `application/json` / `__NEXT_DATA__`, microdata `itemprop`, meta and Open Graph — matched by alias or explicit dotted path. |
 | Label heuristics | `dt/dd`, `th/td`, adjacent blocks and inline `Label: value`, plus bounded structural sibling-wrapper resolution for nested DIV/CSS component layouts; typed validation and component-boundary checks remain mandatory. Umlaut-tolerant (`Wohnflaeche` = `Wohnfläche`). |
 | Typed validation | German and English number formats (`349.000,50 €`, `1,200.50`), areas (`m²`, `qm`), dates, e-mails, phones, URLs, bounds and custom patterns. |
-| Compile-once recipes | JSON-path, label-anchored regex or label recipes per host + URL template in SQLite; hit/miss counters, stale marking, self-healing re-compilation. |
+| Compile-once recipes | JSON-path, label-anchored regex or label recipes per host + URL template in SQLite. |
+| Recipe portfolio | Up to four recipes per field and scope (`primary`, `fallback`, `candidate`; weakest beyond the cap `retired`), ranked by hits/misses/contradictions. Primary runs alone; alternatives only after a primary miss or contradiction; promotion only when the primary is stale and the alternative proved itself twice. `RECIPE_FALLBACK` signal on every fallback answer. Older single-recipe stores migrate automatically. |
 | Throughput | One SQLite connection per store (WAL, `synchronous=NORMAL`), one transaction per page, structured data parsed once per page. `scripts/benchmark.py`: ~1.3 ms per warm page with 5 fields (~750 pages/s offline, before v0.2.1: ~14 ms). |
 | Agent teaching | `teach` values must be grounded in the page; then compiled into recipes. |
 | Provenance | `AGENT_TAUGHT` < `ENGINE_OBSERVED` < `CROSS_CONFIRMED` per field, with `confirmed_by`; optional `min_provenance` turns weaker values into `UNCONFIRMED`. |
 | Recipe assurance | Recipe hits are checked against independent stages; contradicted recipes are discarded and relearned; unconfirmed values repeating across different URLs raise `REPEATED_VALUE`. |
-| Scenario evidence | `docs/EVIDENCE.md`: 7 pathologies and 6 false-positive controls driven through the real engine, regenerated and re-checked by the tests. |
+| Scenario evidence | `docs/EVIDENCE.md`: 9 pathologies and 7 false-positive controls driven through the real engine, regenerated and re-checked by the tests. |
 | Evidence trail | Every field returns `stage`, `page_stage`, `evidence`, `recipe`, `provenance`, `confirmed_by`, `signals` and the full `attempts` path through the escalation graph. |
 | Interfaces | Python API, CLI, Agent Skill and optional MCP server — all on the same core. State directory and fetch policy are **host-bound**, never agent-supplied. |
 | Batch extraction | Host-side `extract-batch` processes explicit URL sets with one warm recipe store, immediate JSONL persistence, de-duplication and progress-preserving per-URL failure handling. `--resume` repairs a torn last line, skips final rows and retries transient failures. The summary exposes `unconfirmed_fields`, `flagged_rows`, `error_codes`, `field_statuses`, `stage_hits` and field `signals` so real failure clusters are measurable. |
@@ -289,7 +302,7 @@ See [`docs/donor-map.md`](docs/donor-map.md) and [`docs/research-basis.md`](docs
 
 ## Status
 
-v0.3.2 is experimental. The public agent surface (`observe → locate → extract`) remains intentionally small; `extract-batch` is a host-side throughput path for explicit URL sets. Recipe derivation, ranking and the render stage will evolve. Licensed under GPL-3.0-only.
+v0.4.0 is experimental. The public agent surface (`observe → locate → extract`) remains intentionally small; `extract-batch` is a host-side throughput path for explicit URL sets. Recipe derivation, ranking and the render stage will evolve. Licensed under GPL-3.0-only.
 
 ---
 

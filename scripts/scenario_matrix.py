@@ -147,6 +147,33 @@ def p7_agent_claim_below_minimum(state: Path) -> tuple[bool, str]:
     return f["status"] == "UNCONFIRMED", f"{f['provenance']} < {f.get('required_provenance')} → {f['status']}"
 
 
+_PROJECT = ('<html><body><main><h1>Neubauprojekt</h1><div class="project-box">'
+            '<span class="lbl">Kaufpreis ab:</span> <b>{} EUR</b></div></main></body></html>')
+
+
+def p8_outlier_overwrites_primary(state: Path) -> tuple[bool, str]:
+    tool = DragonFruitMe(state_dir=state)
+    for n in range(1, 6):
+        tool.extract(fields=PRICE, html=expose(n, f"{300 + n}.000 €"), base_url=BASE.format(n))
+    tool.extract(fields=PRICE, html=_PROJECT.format("499.000"), base_url=BASE.format(6))
+    f = tool.extract(fields=PRICE, html=expose(7, "320.000 €"), base_url=BASE.format(7))["fields"][0]
+    first = f["attempts"][0]
+    ok = (first["outcome"], first["role"]) == ("HIT", "primary") and len(f["attempts"]) == 1
+    return ok, f"after 1 outlier, next page: {first['role']} {first['outcome']} ({len(f['attempts'])} attempt)"
+
+
+def p9_redesign_promotes_alternative(state: Path) -> tuple[bool, str]:
+    tool = DragonFruitMe(state_dir=state)
+    tool.extract(fields=PRICE, html=expose(1, "349.000 €"), base_url=BASE.format(1))
+    steps = []
+    for n, price in ((2, "410.000"), (3, "420.000"), (4, "430.000")):
+        f = tool.extract(fields=PRICE, html=_PROJECT.format(price), base_url=BASE.format(n))["fields"][0]
+        hit = f["attempts"][-1]
+        steps.append(f"{f['stage']}" + ("/promoted" if hit.get("promoted") else ""))
+    ok = steps == ["label", "recipe/promoted", "recipe"] and f["attempts"][0].get("role") == "primary"
+    return ok, " → ".join(steps)
+
+
 # -- false-positive controls -------------------------------------------------------
 
 def c1_captcha_widget_in_content_page(state: Path) -> tuple[bool, str]:
@@ -204,6 +231,15 @@ def c6_same_url_re_extracted(state: Path) -> tuple[bool, str]:
     return not f["signals"], f"5× same URL, signals: {len(f['signals'])}"
 
 
+def c7_healthy_primary_runs_alone(state: Path) -> tuple[bool, str]:
+    tool = DragonFruitMe(state_dir=state)
+    tool.extract(fields=PRICE, html=expose(1, "349.000 €"), base_url=BASE.format(1))
+    tool.extract(fields=PRICE, html=_PROJECT.format("499.000"), base_url=BASE.format(2))  # an alternative exists
+    f = tool.extract(fields=PRICE, html=expose(3, "199.000 €"), base_url=BASE.format(3))["fields"][0]
+    ok = len(f["attempts"]) == 1 and not f["signals"]
+    return ok, f"alternatives stored, recipes tried: {len(f['attempts'])}, signals: {len(f['signals'])}"
+
+
 SCENARIOS = [
     Scenario("P1", "pathology", "Recipe drift after a redesign", "recipe misses, label stage relearns, next page uses new recipe", p1_recipe_drift),
     Scenario("P2", "pathology", "Recipe anchored on a teaser price", "independent stage contradicts, recipe discarded, correct price", p2_false_anchor),
@@ -212,12 +248,15 @@ SCENARIOS = [
     Scenario("P5", "pathology", "JavaScript shell, no browser", "render UNAVAILABLE recorded, NEEDS_AGENT", p5_js_shell_without_renderer),
     Scenario("P6", "pathology", "Agent teaches a value that is not on the page", "NOT_GROUNDED, nothing compiled", p6_ungrounded_teach),
     Scenario("P7", "pathology", "Agent claim below the required provenance", "UNCONFIRMED instead of FOUND", p7_agent_claim_below_minimum),
+    Scenario("P8", "pathology", "Outlier page (project layout) on a proven template", "learned as candidate; primary keeps answering the next normal page", p8_outlier_overwrites_primary),
+    Scenario("P9", "pathology", "Whole template redesigned", "candidate proves itself, is promoted, then runs alone", p9_redesign_promotes_alternative),
     Scenario("C1", "control", "CAPTCHA widget inside a normal content page", "not BLOCKED, value found", c1_captcha_widget_in_content_page),
     Scenario("C2", "control", "New price on the same template", "recipe hit, no signal", c2_price_change_same_template),
     Scenario("C3", "control", "Short per-page ids in markup", "recipe still reused", c3_short_ids),
     Scenario("C4", "control", "Legitimately constant value (agency e-mail)", "never flagged when confirmed by its label", c4_confirmed_constant),
     Scenario("C5", "control", "Structured data and label agree", "CROSS_CONFIRMED", c5_cross_confirmation),
     Scenario("C6", "control", "Same URL extracted repeatedly", "not counted as repetition", c6_same_url_re_extracted),
+    Scenario("C7", "control", "Healthy primary with stored alternatives", "only the primary runs, no signal", c7_healthy_primary_runs_alone),
 ]
 
 

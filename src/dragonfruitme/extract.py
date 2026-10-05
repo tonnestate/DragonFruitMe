@@ -21,7 +21,7 @@ from . import structured
 from .errors import DragonFruitMeError
 from .graph import Block, PageGraph, build_graph
 from .locate import locate
-from .recipes import Recipe, RecipeStore, apply_regex, derive_regex
+from .recipes import PROMOTE_MIN_HITS, STALE_AFTER_MISSES, Recipe, RecipeStore, apply_regex, derive_regex
 from .values import FIELD_TYPES, equivalent, find_typed, fold, normalize_text, validate, value_regex
 
 LABEL_MAX_CHARS = 60
@@ -281,18 +281,27 @@ class Extractor:
                 kind, pattern = "label", label
         if not kind or not pattern:
             return None
-        recipe = Recipe(scope=scope, field=spec["name"], kind=kind, pattern=pattern, origin=origin)
-        self.store.put(recipe)
-        return {"kind": kind, "pattern": pattern, "scope": scope, "compiled": True}
+        stored, created = self.store.add(Recipe(scope=scope, field=spec["name"], kind=kind, pattern=pattern, origin=origin))
+        return {"kind": kind, "pattern": pattern, "scope": scope, "compiled": created, "role": stored.role}
 
-    def run_cheap_stages(self, scope: str, spec: dict[str, Any], page: Page, attempts: list[dict[str, Any]],
-                         learn: bool) -> dict[str, Any] | None:
+    def _run_recipes(self, scope: str, spec: dict[str, Any], page: Page,
+                     attempts: list[dict[str, Any]]) -> dict[str, Any] | None:
+        """Stage 1: the recipe portfolio.
+
+        The primary runs alone. Alternatives are tried only after the primary
+        missed or was contradicted on this page, so a healthy primary costs the
+        same as a single recipe. An alternative that answers is reported with a
+        RECIPE_FALLBACK signal; it replaces the primary only once the primary is
+        stale and the alternative has proven itself at least twice.
+        """
         name = spec["name"]
-        # 1 recipe
-        recipe = self.store.get(scope, name)
-        if recipe is None:
+        recipes = self.store.recipe_set(scope, name)
+        if not recipes:
             attempts.append({"stage": "recipe", "page": page.stage, "outcome": "SKIP", "reason": "NO_RECIPE"})
-        else:
+            return None
+        primary = next((r for r in recipes if r.role == "primary"), None)
+        primary_failed = False
+        for recipe in recipes:
             raw, evidence = self._apply_recipe(recipe, page, spec)
             ok, normalized, reason = validate(raw, spec) if raw else (False, None, "NO_MATCH")
             check = independent_check(page, spec, raw) if ok else ([], [])
@@ -304,22 +313,55 @@ class Extractor:
                 and bool(check[1])
             )
             if ok and not contradicted:
-                self.store.record(scope, name, True)
-                attempts.append({"stage": "recipe", "page": page.stage, "outcome": "HIT", "kind": recipe.kind})
+                assert recipe.id is not None
+                self.store.record_hit(recipe.id, confirmed=bool(check[0]))
+                role = recipe.role
+                promoted = False
+                if role != "primary":
+                    primary_stale = primary is None or (
+                        primary_failed and primary.misses + 1 >= STALE_AFTER_MISSES
+                    )
+                    if primary_stale and recipe.hits + 1 >= PROMOTE_MIN_HITS:
+                        self.store.promote(scope, name, recipe.id)
+                        promoted = True
+                    elif role == "candidate":
+                        self.store.mark_fallback(recipe.id)
+                hit = {"stage": "recipe", "page": page.stage, "outcome": "HIT", "kind": recipe.kind, "role": role}
+                if promoted:
+                    hit["promoted"] = True
+                attempts.append(hit)
                 found = self._found(spec, raw, normalized, "recipe", page,
-                                    {"recipe_kind": recipe.kind, **evidence},
-                                    {"kind": recipe.kind, "pattern": recipe.pattern, "scope": scope, "compiled": False})
-                return self._assess(scope, spec, page, found, recipe.origin, check)
+                                    {"recipe_kind": recipe.kind, "recipe_role": role, **evidence},
+                                    {"kind": recipe.kind, "pattern": recipe.pattern, "scope": scope,
+                                     "compiled": False, "role": "primary" if promoted else role})
+                found = self._assess(scope, spec, page, found, recipe.origin, check)
+                if role != "primary":
+                    found["signals"].append({"code": "RECIPE_FALLBACK", "role": role, "kind": recipe.kind,
+                                             "promoted": promoted})
+                return found
             if contradicted:
                 reason = "CONTRADICTED"
-            status = self.store.record(scope, name, False)
+            assert recipe.id is not None
+            self.store.record_miss(recipe.id, contradicted=contradicted)
+            if recipe.role == "primary":
+                primary_failed = True
             miss = {"stage": "recipe", "page": page.stage, "outcome": "MISS", "reason": reason,
-                    "kind": recipe.kind, "recipe_status": status}
+                    "kind": recipe.kind, "role": recipe.role,
+                    "recipe_status": "stale" if recipe.misses + 1 >= STALE_AFTER_MISSES else "active"}
             if contradicted:
                 # the recipe answered, but an independent stage on this page says otherwise
                 miss["recipe_value"] = normalize_text(raw)
                 miss["contradicted_by"] = check[1]
             attempts.append(miss)
+        return None
+
+    def run_cheap_stages(self, scope: str, spec: dict[str, Any], page: Page, attempts: list[dict[str, Any]],
+                         learn: bool) -> dict[str, Any] | None:
+        name = spec["name"]
+        # 1 recipe portfolio
+        found = self._run_recipes(scope, spec, page, attempts)
+        if found is not None:
+            return found
         # 2 structured
         seen = 0
         for source, path, raw in structured.candidates(page.graph, spec):

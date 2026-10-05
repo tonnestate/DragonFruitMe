@@ -6,7 +6,7 @@ Every scenario drives the real engine offline. **Pathologies** must be detected;
 **controls** are healthy situations that must *not* trigger a detector — a detector that fires
 on healthy pages is itself a failure mode, so both carry equal weight.
 
-**Result: 13/13 scenarios pass.**
+**Result: 16/16 scenarios pass.**
 
 | ID | Kind | Scenario | Expected | Observed | Result |
 |---|---|---|---|---|---|
@@ -17,9 +17,12 @@ on healthy pages is itself a failure mode, so both carry equal weight.
 | P5 | pathology | JavaScript shell, no browser | render UNAVAILABLE recorded, NEEDS_AGENT | render UNAVAILABLE → NEEDS_AGENT | PASS |
 | P6 | pathology | Agent teaches a value that is not on the page | NOT_GROUNDED, nothing compiled | NOT_GROUNDED, no recipe stored | PASS |
 | P7 | pathology | Agent claim below the required provenance | UNCONFIRMED instead of FOUND | AGENT_TAUGHT < ENGINE_OBSERVED → UNCONFIRMED | PASS |
+| P8 | pathology | Outlier page (project layout) on a proven template | learned as candidate; primary keeps answering the next normal page | after 1 outlier, next page: primary HIT (1 attempt) | PASS |
+| P9 | pathology | Whole template redesigned | candidate proves itself, is promoted, then runs alone | label → recipe/promoted → recipe | PASS |
 | C1 | control | CAPTCHA widget inside a normal content page | not BLOCKED, value found | not blocked, FOUND | PASS |
 | C2 | control | New price on the same template | recipe hit, no signal | recipe 1.250.000 €, signals: 0 | PASS |
 | C3 | control | Short per-page ids in markup | recipe still reused | recipe 199.000 € | PASS |
 | C4 | control | Legitimately constant value (agency e-mail) | never flagged when confirmed by its label | same e-mail on 5 pages, flagged: 0 | PASS |
 | C5 | control | Structured data and label agree | CROSS_CONFIRMED | structured → CROSS_CONFIRMED by structured+label | PASS |
 | C6 | control | Same URL extracted repeatedly | not counted as repetition | 5× same URL, signals: 0 | PASS |
+| C7 | control | Healthy primary with stored alternatives | only the primary runs, no signal | alternatives stored, recipes tried: 1, signals: 0 | PASS |

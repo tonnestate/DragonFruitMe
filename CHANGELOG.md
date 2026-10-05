@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.4.0 — 2026-10-05
+
+Recipe portfolio: compile alternatives instead of overwriting the winner.
+
+- each `(scope, field)` keeps up to four live recipes with a role — `primary`, `fallback`, `candidate` — and retires the weakest alternative beyond the cap;
+- per-recipe evidence: `hits`, consecutive `misses`, `total_misses`, `contradictions`, `confirmed_hits`, `last_validated`; alternatives are ranked by a Laplace-smoothed score, recipe kind only breaks ties;
+- a newly compiled recipe never overwrites a working primary: it joins as a candidate (the compiling page counts as its first hit); one outlier page can no longer replace a recipe that worked hundreds of times;
+- the primary runs alone; alternatives are tried only after a primary miss or contradiction — no shadow execution, so the hot path is unchanged (interleaved benchmark vs 0.3.2: 1.45 ms vs 1.44 ms median per warm page);
+- promotion only when the primary is stale on the page and the alternative has ≥ 2 hits; the old primary is demoted to `fallback`, not deleted;
+- every alternative answer carries a `RECIPE_FALLBACK` signal and is counted by the `extract-batch` signal telemetry, so a redesign cannot hide behind a silent fallback;
+- `recipes` lists roles, counters and scores; `put()` installs a recipe as primary and keeps the previous one as fallback;
+- automatic in-place migration of single-recipe stores (schema version 0 → 2);
+- scenario matrix: new pathologies P8 (outlier page on a proven template) and P9 (template redesign → promotion) and control C7 (healthy primary runs alone); restoring the old overwrite behaviour fails all three;
+- portfolio, ranking, cap and migration tests; documentation, Skill and protocol updated.
+
 ## 0.3.2 — 2026-10-05
 
 Real-world edge hardening without widening the agent surface.

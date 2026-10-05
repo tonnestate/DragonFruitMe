@@ -100,7 +100,10 @@ Render policy: `auto` renders only if a field is unresolved **and** the page is 
 * **Kinds** in order of preference: `json` (structured path) › `regex` › `label`.
 * **Regex derivation:** find the value in raw HTML (whitespace/entity-tolerant). First try an anchor that starts at the nearest preceding occurrence of the visible label (≤300 chars before). Otherwise try markup anchors of increasing length (16…160 chars), snapped to a tag start. Whitespace becomes `\s*`, digit runs ≥3 become `\d+` (ids change per page). The capture group is **typed** (`price`, `area`, …) or a text node (`[^<]+?` up to `<` or the literal delimiter that followed the value). A candidate is accepted only if its first match equals the value and all matches agree.
 * **Storage:** one SQLite connection per store (WAL journal, `synchronous=NORMAL`, thread-safe via a re-entrant lock). The extractor wraps each page's cheap stages in one `BEGIN IMMEDIATE … COMMIT` transaction (a second one after rendering); rendering itself runs outside any transaction, so no store lock is held during network I/O. A crash loses at most the counters and recipes of the page in progress. Several processes may share one state directory.
-* **Lifecycle:** hit → `hits+1, misses=0, active`; miss → `misses+1`, `stale` after 2 misses; any later hit in stages 2–5 overwrites the recipe (self-healing).
+* **Portfolio (v0.4.0):** per `(scope, field)` at most `MAX_LIVE` = 4 live recipes with a role: one `primary`, `fallback` (an alternative that has answered when needed) and `candidate` (newly compiled, unproven). Beyond the cap the weakest alternative becomes `retired` (kept for audit, never executed). Every recipe tracks `hits`, consecutive `misses`, `total_misses`, `contradictions`, `confirmed_hits` (hits an independent stage confirmed) and `last_validated`.
+* **Execution:** the primary runs alone. Only after it misses or is contradicted on this page are the alternatives tried, ordered by a Laplace-smoothed score `(hits+1)/(hits+total_misses+2·contradictions+2)`; the recipe kind (json › regex › label) only breaks ties. A healthy primary therefore costs the same as a single recipe. Every alternative answer carries a `RECIPE_FALLBACK` signal (`role`, `kind`, `promoted`).
+* **Lifecycle:** a compiled recipe becomes the primary only if the field has none; otherwise it joins as a `candidate` and the compiling page counts as its first hit. Hit → `hits+1, misses=0`; miss → `misses+1`, `stale` after 2 in a row. An alternative is **promoted** when the primary is stale on this page and the alternative has at least `PROMOTE_MIN_HITS` = 2 hits; the old primary is demoted to `fallback`, not deleted, so a returning layout is answered immediately. A candidate that answers without promotion becomes a `fallback`. Legacy single-recipe stores (schema version 0) are migrated in place: each recipe becomes its field's primary.
+* **No shadow execution:** candidates are not evaluated in parallel with a healthy primary. They prove themselves exactly when they are needed, which keeps the hot path flat.
 
 ## 7. Assurance: provenance, contradiction, repetition
 
@@ -115,7 +118,7 @@ After a stage finds a value, the structured and label stages are asked **indepen
 
 **Repetition:** the store remembers, per scope and field, the last URL, the last value and how many *different* consecutive URLs produced that value. From `REPEAT_THRESHOLD` = 3 URLs on, an **unconfirmed** value carries a `REPEATED_VALUE` signal. Re-extracting the same URL does not count, and confirmed constants (an agency e-mail with its label) are never flagged.
 
-**Evidence:** `scripts/scenario_matrix.py` drives the engine through 7 pathologies and 6 false-positive controls and renders `docs/EVIDENCE.md`; the test suite fails if a scenario fails or the file is stale. Disabling the independent check makes one pathology and two controls fail, so the matrix measures the mechanism rather than restating it.
+**Evidence:** `scripts/scenario_matrix.py` drives the engine through 9 pathologies and 7 false-positive controls and renders `docs/EVIDENCE.md`; the test suite fails if a scenario fails or the file is stale. Disabling the independent check makes one pathology and two controls fail; restoring the pre-0.4 "new recipe overwrites the primary" behaviour makes P8, P9 and C7 fail — the matrix measures the mechanisms rather than restating them.
 
 ## 8. Invariants
 
@@ -132,7 +135,6 @@ After a stage finds a value, the structured and label stages are asked **indepen
 
 * CSS/XPath recipe kind and DOM-path anchors next to regex anchors.
 * Multi-value fields (lists, tables → rows).
-* Recipe history with fallback to the last good recipe; A/B validation before overwriting an active recipe.
 * JSON Schemas for field specs and results with contract tests.
 * Optional HTTP clients (HTTP/2) as an extra stage between `http` and `render`.
 * Off-page SEO providers (PageSpeed Insights, CrUX, Search Console, OpenRush) as optional plugins.

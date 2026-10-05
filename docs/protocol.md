@@ -49,6 +49,8 @@ Types: `text, price, area, number, integer, date, email, phone, url`.
 
 Field result: `name, type, status, value, normalized, stage, page_stage, evidence, recipe, provenance, confirmed_by[], signals[], attempts[]`; `UNCONFIRMED` adds `required_provenance`; `NEEDS_AGENT` adds `candidates[]` and `next`.
 
+Field `recipe` object: `{kind, pattern, scope, compiled, role}`; `compiled: true` means a new recipe was added by this call, `role` is its portfolio role (`primary` or `candidate` for new recipes).
+
 Field status: `FOUND`, `UNCONFIRMED` (value below `min_provenance`), `NEEDS_AGENT`, `NOT_GROUNDED`.
 
 Provenance: `AGENT_TAUGHT` < `ENGINE_OBSERVED` < `CROSS_CONFIRMED`. `min_provenance` accepts these names case-insensitively.
@@ -59,6 +61,7 @@ Signals:
 |---|---|
 | `STAGE_DISAGREEMENT` | an independent stage answered differently (`disagreements[]: {stage, value}`), but the value was kept |
 | `REPEATED_VALUE` | the same unconfirmed value on `urls` ≥ 3 different consecutive URLs of the scope |
+| `RECIPE_FALLBACK` | the primary recipe missed or was contradicted and an alternative answered (`role`: `fallback`/`candidate`, `kind`, `promoted`: whether it became the new primary) |
 
 Call result: `status (COMPLETE | PARTIAL | INCOMPLETE), scope, fields[], pages[], found, total`.
 
@@ -79,7 +82,7 @@ dragonfruitme extract-batch --urls-file FILE --fields-json JSON [--output OUT.js
 
 | stage | outcomes |
 |---|---|
-| `recipe` | `SKIP` (`NO_RECIPE`), `HIT`, `MISS` (+ validation reason or `CONTRADICTED` with `recipe_value`, `contradicted_by[]`, and `recipe_status`) |
+| `recipe` | one attempt per recipe tried, each with `kind` and `role`: `SKIP` (`NO_RECIPE`), `HIT` (+ `promoted`), `MISS` (+ validation reason or `CONTRADICTED` with `recipe_value`, `contradicted_by[]`, and `recipe_status`) |
 | `structured` | `HIT`, `MISS` (`NO_CANDIDATE`, `NO_VALID_CANDIDATE`) |
 | `label` | `HIT`, `MISS` (`NO_LABEL`, `NO_VALID_CANDIDATE`) |
 | `render` | `RENDERED`, `SKIP` (`PAGE_NOT_JS_SHELL`, `NO_URL_OR_RENDERER`, `RENDER_NEVER`), `UNAVAILABLE`, `FAILED` |

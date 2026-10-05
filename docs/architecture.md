@@ -71,7 +71,7 @@ For high-volume enumeration, traversal evidence can be consumed deterministicall
 
 The runner is budgeted by `max_pages`, `max_urls` and `max_depth`. It does not perform external search and does not fetch detail pages during expansion. A budget stop leaves `frontier_exhausted=false`; completeness is never inferred from hitting a limit. The agent-facing `observe.traversal` remains small and sampled, while the host-side frontier can retain every visible candidate URL.
 
-## 6. Locate (`locate.py`)
+## 5. Locate (`locate.py`)
 
 BM25 (k1 = 1.2, b = 0.75) per block, multiplied by the block weight, plus:
 

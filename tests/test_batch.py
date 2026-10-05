@@ -68,6 +68,8 @@ def test_extract_batch_deduplicates_flushes_and_continues(tmp_path, monkeypatch,
         "field_statuses": {"FOUND": 2},
         "stage_hits": {},
         "signals": {},
+        "field_outcomes": {"phone": {"FOUND": 2}},
+        "advisories": [],
     }
 
 
@@ -231,3 +233,119 @@ def test_extract_batch_aggregates_failure_and_stage_telemetry(tmp_path, monkeypa
     assert summary["field_statuses"] == {"FOUND": 1, "UNCONFIRMED": 1, "NEEDS_AGENT": 1}
     assert summary["stage_hits"] == {"recipe": 1, "label": 1}
     assert summary["signals"] == {"STAGE_DISAGREEMENT": 1}
+
+
+def test_batch_advisory_low_yield_requires_meaningful_sample():
+    base = {
+        "total": 9,
+        "attempted": 9,
+        "complete": 0,
+        "partial": 0,
+        "incomplete": 0,
+        "errors": 9,
+        "field_statuses": {},
+        "field_outcomes": {},
+    }
+    assert cli._batch_advisories(base) == []
+
+    base.update({"total": 10, "attempted": 10, "complete": 1, "errors": 9})
+    advisories = cli._batch_advisories(base)
+    assert [a["code"] for a in advisories] == ["LOW_BATCH_YIELD"]
+    assert advisories[0]["evidence"]["usable_ratio"] == 0.1
+
+
+def test_batch_advisory_detects_agent_escalation_and_systematic_field_gap():
+    counts = {
+        "total": 10,
+        "attempted": 10,
+        "complete": 0,
+        "partial": 10,
+        "incomplete": 0,
+        "errors": 0,
+        "field_statuses": {"FOUND": 2, "NEEDS_AGENT": 8},
+        "field_outcomes": {
+            "name": {"FOUND": 2, "NEEDS_AGENT": 8},
+            "phone": {"NEEDS_AGENT": 10},
+        },
+    }
+    advisories = cli._batch_advisories(counts)
+    codes = {a["code"] for a in advisories}
+    assert "HIGH_AGENT_ESCALATION" in codes
+    assert "SYSTEMATIC_FIELD_GAPS" in codes
+    gaps = next(a for a in advisories if a["code"] == "SYSTEMATIC_FIELD_GAPS")
+    assert gaps["evidence"]["fields"] == [
+        {"field": "phone", "observations": 10, "statuses": {"NEEDS_AGENT": 10}}
+    ]
+
+
+def test_batch_advisory_field_gap_output_is_bounded():
+    outcomes = {f"field_{i}": {"NEEDS_AGENT": 10} for i in range(7)}
+    counts = {
+        "total": 10,
+        "attempted": 10,
+        "complete": 0,
+        "partial": 10,
+        "incomplete": 0,
+        "errors": 0,
+        "field_statuses": {"FOUND": 63, "NEEDS_AGENT": 7},
+        "field_outcomes": outcomes,
+    }
+    gaps = next(
+        a for a in cli._batch_advisories(counts)
+        if a["code"] == "SYSTEMATIC_FIELD_GAPS"
+    )
+    assert len(gaps["evidence"]["fields"]) == 5
+    assert gaps["evidence"]["omitted_fields"] == 2
+
+
+def test_empty_batch_advisory_is_informational_only(tmp_path, monkeypatch, capsys):
+    urls = tmp_path / "urls.txt"
+    urls.write_text("", encoding="utf-8")
+    fake = FakeTool()
+    monkeypatch.setattr(cli, "DragonFruitMe", lambda **kwargs: fake)
+
+    with pytest.raises(SystemExit) as exit_info:
+        cli.main([
+            "extract-batch",
+            "--urls-file", str(urls),
+            "--fields-json", '[{"name":"phone"}]',
+        ])
+
+    assert exit_info.value.code == 0
+    assert fake.calls == []
+    summary = json.loads(capsys.readouterr().err)["batch"]
+    assert summary["advisories"][0]["code"] == "EMPTY_INPUT_SET"
+    assert summary["advisories"][0]["severity"] == "info"
+
+
+def test_warning_advisories_do_not_change_batch_exit_code(tmp_path, monkeypatch, capsys):
+    urls = tmp_path / "urls.txt"
+    urls.write_text(
+        "".join(f"https://example.org/{i}\n" for i in range(10)),
+        encoding="utf-8",
+    )
+
+    class NoProgressTool:
+        def extract(self, *, fields, url, render, learn):
+            return {
+                "ok": True,
+                "status": "INCOMPLETE",
+                "fields": [{"name": "phone", "status": "NEEDS_AGENT", "signals": []}],
+            }
+
+    monkeypatch.setattr(cli, "DragonFruitMe", lambda **kwargs: NoProgressTool())
+    with pytest.raises(SystemExit) as exit_info:
+        cli.main([
+            "extract-batch",
+            "--urls-file", str(urls),
+            "--fields-json", '[{"name":"phone"}]',
+            "--render", "never",
+        ])
+
+    assert exit_info.value.code == 0
+    summary = json.loads(capsys.readouterr().err)["batch"]
+    assert {a["code"] for a in summary["advisories"]} == {
+        "LOW_BATCH_YIELD",
+        "HIGH_AGENT_ESCALATION",
+        "SYSTEMATIC_FIELD_GAPS",
+    }

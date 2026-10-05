@@ -12,7 +12,7 @@
 <p align="center">
   <img alt="License" src="https://img.shields.io/badge/license-GPL--3.0-blue">
   <img alt="Status" src="https://img.shields.io/badge/status-experimental-orange">
-  <img alt="Version" src="https://img.shields.io/badge/version-0.4.2-ff2d8a">
+  <img alt="Version" src="https://img.shields.io/badge/version-0.4.3-ff2d8a">
   <img alt="Python" src="https://img.shields.io/badge/python-%3E%3D3.10-3776AB">
   <img alt="Dependencies" src="https://img.shields.io/badge/runtime%20deps-none-brightgreen">
   <img alt="MCP" src="https://img.shields.io/badge/MCP-optional-5b5bd6">
@@ -91,7 +91,9 @@ The coverage rule is intentionally fail-closed:
 
 > **One observed page may prove that traversal is incomplete, but it can never by itself prove that a whole source is complete.**
 
-`coverage_status` is therefore `INCOMPLETE` when pagination or lower-level candidates are visible, otherwise `UNKNOWN`. `claim_complete` remains false. DragonFruitMe exposes the frontier; it still does not autonomously crawl it.
+`coverage_status` is therefore `INCOMPLETE` when pagination or lower-level candidates are visible, otherwise `UNKNOWN`. `claim_complete` remains false.
+
+For high-volume enumeration, the host no longer has to send those sampled links back through the agent one by one. The host-side `expand-source` path exhausts detected pagination and repeated child/detail link scopes under explicit page/URL/depth budgets, materializing a de-duplicated detail-URL queue before extraction. The agent-facing traversal view remains bounded; the host-side frontier retains the complete visible URL set.
 
 **Compile once.** When stage 2–5 finds a field, DragonFruitMe derives the cheapest stable recipe and stores it per *scope* (host + URL template, e.g. `example.de/expose/*`):
 
@@ -140,9 +142,9 @@ An agent can never raise the provenance of its own claim; only independent stage
 
 ---
 
-## What DragonFruitMe v0.4.2 can do today
+## What DragonFruitMe v0.4.3 can do today
 
-| Capability | v0.4.2 behavior |
+| Capability | v0.4.3 behavior |
 |---|---|
 | Fetch ladder | Inline HTML → stdlib HTTP (gzip/deflate, charset detection) → optional Playwright rendering. |
 | Polite by default | Honest User-Agent, robots.txt honoured, per-host minimum interval, response size cap, page cache (observe + locate + extract = one request). |
@@ -164,6 +166,7 @@ An agent can never raise the provenance of its own claim; only independent stage
 | Evidence trail | Every field returns `stage`, `page_stage`, `evidence`, `recipe`, `provenance`, `confirmed_by`, `signals` and the full `attempts` path through the escalation graph. |
 | Interfaces | Python API, CLI, Agent Skill and optional MCP server — all on the same core. State directory and fetch policy are **host-bound**, never agent-supplied. |
 | Batch extraction | Host-side `extract-batch` processes explicit URL sets with one warm recipe store, immediate JSONL persistence, de-duplication and progress-preserving per-URL failure handling. `--resume` repairs a torn last line, skips final rows and retries transient failures. The summary exposes `error_codes`, `field_statuses`, per-field `field_outcomes`, `stage_hits`, `signals` and non-blocking `advisories` for unusually low yield, excessive agent escalation or fields that are systematically never found. |
+| Source expansion | Host-side `expand-source` turns productive listing/directory seeds into a de-duplicated detail-URL queue by exhausting bounded pagination and repeated child/detail scopes under explicit host budgets. Search can then return to discovery only after the current source frontier is exhausted. |
 
 The core has **no mandatory third-party runtime dependencies**. MCP and the browser stage are optional extras.
 
@@ -194,6 +197,8 @@ dragonfruitme extract --url https://example.org/expose/4711 --fields-json '[
   {"name": "wohnflaeche", "type": "area",    "aliases": ["Wohnfläche"]},
   {"name": "baujahr",     "type": "integer", "min": 1800, "max": 2030}
 ]'
+
+dragonfruitme expand-source --urls-file sources.txt --output detail-urls.txt
 
 dragonfruitme recipes                       # what has been compiled
 dragonfruitme forget --scope example.org/expose/*
@@ -306,7 +311,7 @@ See [`docs/donor-map.md`](docs/donor-map.md) and [`docs/research-basis.md`](docs
 
 ## Status
 
-v0.4.2 is experimental. The public agent surface (`observe → locate → extract`) remains intentionally small; `extract-batch` is a host-side throughput path for explicit URL sets. Recipe derivation, ranking and the render stage will evolve. Licensed under GPL-3.0-only.
+v0.4.3 is experimental. The public agent surface (`observe → locate → extract`) remains intentionally small; `extract-batch` is a host-side throughput path for explicit URL sets. Recipe derivation, ranking and the render stage will evolve. Licensed under GPL-3.0-only.
 
 ---
 

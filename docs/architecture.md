@@ -1,6 +1,6 @@
-# Architecture and Specification (v0.4.2)
+# Architecture and Specification (v0.4.3)
 
-DragonFruitMe has one job: give an AI agent precise, cheap and provable access to the content of web pages. It is built from three graphs and a recipe store. This specification reflects the v0.4.2 system, including traversal coverage evidence, the bounded recipe portfolio, promotion/demotion lifecycle, constant-time live-recipe dispatch and non-blocking batch sanity feedback.
+DragonFruitMe has one job: give an AI agent precise, cheap and provable access to the content of web pages. It is built from three graphs and a recipe store. This specification reflects the v0.4.3 system, including traversal coverage evidence, the bounded recipe portfolio, promotion/demotion lifecycle, constant-time live-recipe dispatch and non-blocking batch sanity feedback.
 
 ```text
                  ┌──────────── host-bound ────────────┐
@@ -65,7 +65,13 @@ Coverage invariant:
 
 Therefore `coverage_status` is `INCOMPLETE` when pagination or candidate child levels are open and `UNKNOWN` otherwise. `claim_complete` is always false. This prevents a level-0 listing from being mistaken for complete coverage when phone numbers, e-mail addresses or other fields live one level deeper.
 
-## 4. Locate (`locate.py`)
+## 4. Host-side source expansion (`source_expand.py`)
+
+For high-volume enumeration, traversal evidence can be consumed deterministically without routing every discovered URL back through the agent. `expand-source` starts from explicit source/listing URLs, materializes bounded pagination templates, follows repeated `child_candidates` to lower listing levels and emits repeated `detail_candidates` as a de-duplicated detail-URL queue.
+
+The runner is budgeted by `max_pages`, `max_urls` and `max_depth`. It does not perform external search and does not fetch detail pages during expansion. A budget stop leaves `frontier_exhausted=false`; completeness is never inferred from hitting a limit. The agent-facing `observe.traversal` remains small and sampled, while the host-side frontier can retain every visible candidate URL.
+
+## 5. Locate (`locate.py`)
 
 BM25 (k1 = 1.2, b = 0.75) per block, multiplied by the block weight, plus:
 
@@ -76,7 +82,7 @@ BM25 (k1 = 1.2, b = 0.75) per block, multiplied by the block weight, plus:
 
 Label-like hits (short block) carry the `next` block in the same section — that is where the value usually is. Output is bounded by `max_results` and `max_context_chars` and flags `results_truncated` / `context_truncated`.
 
-## 5. Escalation graph (`extract.py`)
+## 6. Escalation graph (`extract.py`)
 
 Per field, in this order. A stage only counts when its candidate passes `validate()`.
 
@@ -96,7 +102,7 @@ Render policy: `auto` renders only if a field is unresolved **and** the page is 
 
 **Teaching:** a field with `teach` skips stages 1–5 and is checked instead: it must validate against the type and occur in the page (structured value, raw HTML or visible text). Otherwise → `NOT_GROUNDED`. Grounded values are compiled like stage 2/3 hits.
 
-## 6. Recipes (`recipes.py`)
+## 7. Recipes (`recipes.py`)
 
 * **Scope** = host (without `www.`) + up to four path segments, where segments with digits or long slugs become `*`. `/expose/123456` and `/expose/987` share a scope; `/angebote` has its own.
 * **Kinds** in order of preference: `json` (structured path) › `regex` › `label`.
@@ -108,7 +114,7 @@ Render policy: `auto` renders only if a field is unresolved **and** the page is 
 * **Dispatch index (v0.4.1):** recipes have a stable `id`; `scope`, `field` and `role` are mutable, indexed attributes. Live lookups use `recipe_set_bucket (scope, field, role)` with an explicit `role IN (…)` list, so they touch only the ≤ 4 live recipes of one bucket — independent of how many recipes the store holds and of how many were retired in that bucket. Promotion, demotion and retirement update the role in place inside the page transaction, so the index is always consistent. Retired history is capped at `RETIRED_KEEP` = 16 per bucket (oldest deleted). Invariant: a primary miss tries at most `MAX_LIVE − 1` alternatives; there is no global candidate scan. `scripts/benchmark.py --scaling` verifies flat healthy-primary latency from 1 to 100,000 stored recipes.
 * **No shadow execution:** candidates are not evaluated in parallel with a healthy primary. They prove themselves exactly when they are needed, which keeps the hot path flat.
 
-## 7. Assurance: provenance, contradiction, repetition
+## 8. Assurance: provenance, contradiction, repetition
 
 After a stage finds a value, the structured and label stages are asked **independently** about it on the same page:
 
@@ -123,7 +129,7 @@ After a stage finds a value, the structured and label stages are asked **indepen
 
 **Evidence:** `scripts/scenario_matrix.py` drives the engine through 9 pathologies and 7 false-positive controls and renders `docs/EVIDENCE.md`; the test suite fails if a scenario fails or the file is stale. Disabling the independent check makes one pathology and two controls fail; restoring the pre-0.4 "new recipe overwrites the primary" behaviour makes P8, P9 and C7 fail — the matrix measures the mechanisms rather than restating them.
 
-## 8. Batch sanity feedback (host-side)
+## 9. Batch sanity feedback (host-side)
 
 `extract-batch` already aggregates observed errors, field statuses, extraction stages and field signals. v0.4.2 adds a deliberately small advisory layer over those measurements. It is not an expert system and has no domain knowledge.
 
@@ -131,7 +137,7 @@ The layer uses fixed, inspectable guards: at least 10 attempted rows before low-
 
 An advisory is evidence for the caller to reconsider or confirm its plan, never authority to change that plan. It does not stop the batch, does not mutate the requested fields, does not invent a discovery strategy and does not affect the exit code. This preserves the universal-tool boundary: DragonFruitMe can say "this outcome is unusual" without claiming "this postal code, industry, source or task is wrong."
 
-## 9. Invariants
+## 10. Invariants
 
 1. No stage may return a value that fails type validation.
 2. No taught value is accepted unless it occurs in the page.
@@ -142,7 +148,7 @@ An advisory is evidence for the caller to reconsider or confirm its plan, never 
 7. The core imports only the Python standard library.
 8. One observed page never authorizes a whole-source completeness claim; visible pagination or repeated child scopes remain explicit traversal evidence.
 
-## 10. Deferred
+## 11. Deferred
 
 * CSS/XPath recipe kind and DOM-path anchors next to regex anchors.
 * Multi-value fields (lists, tables → rows).

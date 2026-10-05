@@ -65,6 +65,15 @@ Signals:
 
 Call result: `status (COMPLETE | PARTIAL | INCOMPLETE), scope, fields[], pages[], found, total`.
 
+## `expand-source` (host-side CLI only, not an agent operation)
+
+```bash
+dragonfruitme expand-source --urls-file SOURCES [--output DETAIL_URLS]
+                            [--max-pages N] [--max-urls N] [--max-depth N]
+```
+
+The command consumes explicit listing/directory seed URLs. It follows detected pagination and repeated lower-level listing scopes, materializes repeated detail scopes as a de-duplicated URL queue, and stops at host-owned budgets. It does not call a search engine, does not fetch detail pages during expansion, and never treats a budget stop as proof of completeness. Stdout (or `--output`) is one detail URL per line; stderr contains the bounded expansion summary including `source_pages_fetched`, `detail_count`, `fanout_per_source_page`, `frontier_exhausted`, `limited_by`, `remaining_source_pages` and errors.
+
 ## `extract-batch` (host-side CLI only, not an agent operation)
 
 ```bash

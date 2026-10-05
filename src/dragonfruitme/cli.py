@@ -172,6 +172,28 @@ def _batch_advisories(counts: dict) -> list[dict]:
     return advisories
 
 
+def _expand_source(args: argparse.Namespace, tool: DragonFruitMe) -> int:
+    """Expand productive listing/directory sources before returning to search."""
+    seeds = _read_urls(args.urls_file)
+    result = tool.expand_source(
+        seed_urls=seeds,
+        max_pages=args.max_pages,
+        max_urls=args.max_urls,
+        max_depth=args.max_depth,
+    )
+    urls = result.get("detail_urls") or []
+    if args.output:
+        path = Path(args.output).expanduser()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("".join(f"{url}\n" for url in urls), encoding="utf-8")
+    else:
+        for url in urls:
+            sys.stdout.write(url + "\n")
+    summary = {key: value for key, value in result.items() if key not in {"detail_urls", "source_pages"}}
+    sys.stderr.write(json.dumps(summary, ensure_ascii=False, separators=(",", ":")) + "\n")
+    return 0 if result.get("ok") else 2
+
+
 def _batch_extract(args: argparse.Namespace, tool: DragonFruitMe) -> int:
     """Process an explicit URL set without turning the agent into a loop/merge engine."""
     urls = _read_urls(args.urls_file)
@@ -305,6 +327,19 @@ def main(argv: list[str] | None = None) -> None:
     p_batch.add_argument("--fail-on-error", action="store_true",
                          help="exit 2 if any URL failed; default is progress-preserving exit 0")
 
+    p_expand = sub.add_parser(
+        "expand-source",
+        help="exhaust pagination and repeated child/detail links from explicit source/listing URLs",
+    )
+    p_expand.add_argument("--urls-file", required=True, help="newline-delimited source URLs or a JSON array")
+    p_expand.add_argument("--output", help="write discovered detail URLs one per line; stdout when omitted")
+    p_expand.add_argument("--max-pages", type=int, default=5000,
+                          help="maximum listing/source pages to fetch (default: 5000)")
+    p_expand.add_argument("--max-urls", type=int, default=100000,
+                          help="maximum detail URLs to materialize (default: 100000)")
+    p_expand.add_argument("--max-depth", type=int, default=3,
+                          help="maximum child-listing depth below each seed (default: 3)")
+
     p_recipes = sub.add_parser("recipes", help="list stored recipes")
     p_recipes.add_argument("--scope")
 
@@ -315,6 +350,11 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
     if args.command == "extract-batch" and args.resume and not args.output:
         parser.error("--resume requires --output")
+    if args.command == "expand-source":
+        if args.max_pages < 1 or args.max_urls < 1:
+            parser.error("--max-pages and --max-urls must be >= 1")
+        if args.max_depth < 0:
+            parser.error("--max-depth must be >= 0")
 
     policy = FetchPolicy.from_env()
     if args.ignore_robots:
@@ -332,6 +372,8 @@ def main(argv: list[str] | None = None) -> None:
                               learn=not args.no_learn, **_source(args))
     elif args.command == "extract-batch":
         raise SystemExit(_batch_extract(args, tool))
+    elif args.command == "expand-source":
+        raise SystemExit(_expand_source(args, tool))
     elif args.command == "recipes":
         result = tool.recipes(scope=args.scope)
     else:

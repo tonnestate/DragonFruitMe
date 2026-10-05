@@ -71,6 +71,8 @@ field "kaufpreis" (type: price)
 
 Each stage must **validate** its candidate against the field type (`price`, `area`, `number`, `integer`, `date`, `email`, `phone`, `url`, `text`, plus optional `min`, `max`, `pattern`). A stage that finds something that is not a valid price does not count, and the field escalates.
 
+**Defining property of the Escalation Graph.** Since DragonFruitMe's initial public release on **2026-10-04**, escalation has not meant a one-way fallback ladder. Its defining edge is the **backward compilation edge from stages 2–5 to stage 1**: once a more expensive stage produces a validated result, DragonFruitMe compiles that result into a deterministic recipe so later pages in the same scope can start at the cheapest stage instead of repeating the expensive path.
+
 ### 3. Traversal graph (page → open coverage edges)
 
 For enumeration tasks, finding records on one page is not proof that the source is exhausted. `observe` therefore returns a separate `traversal` object:

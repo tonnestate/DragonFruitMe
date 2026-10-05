@@ -1,6 +1,6 @@
-# Architecture and Specification (v0.3.1)
+# Architecture and Specification (v0.4.1)
 
-DragonFruitMe has one job: give an AI agent precise, cheap and provable access to the content of web pages. It is built from three graphs and a recipe store.
+DragonFruitMe has one job: give an AI agent precise, cheap and provable access to the content of web pages. It is built from three graphs and a recipe store. This specification reflects the v0.4.1 system, including traversal coverage evidence, the bounded recipe portfolio, promotion/demotion lifecycle and constant-time live-recipe dispatch.
 
 ```text
                  ┌──────────── host-bound ────────────┐
@@ -87,6 +87,8 @@ Per field, in this order. A stage only counts when its candidate passes `validat
 | 3 | `label` | exact label blocks (dt→dd, th→td same row, label→next block) first; then bounded structural sibling-wrapper neighbours inside the same component; then inline `Label: value`; main region first | compile `regex` (label-anchored) or `label` recipe |
 | 4 | `render` | re-run 1–3 on the rendered page | as above |
 | 5 | `agent` | — | `NEEDS_AGENT` with ≤3 ranked candidates |
+
+**Defining backward edge (public since 2026-10-04):** the escalation graph is not only the forward sequence `1 → 2 → 3 → 4 → 5`. A validated hit from stages 2–5 is compiled back into stage 1 for the same scope and field. That backward compilation edge is what turns escalation into learning: expensive resolution is paid once, then reused deterministically. In v0.4.x the compiled result joins the bounded recipe portfolio instead of blindly overwriting a proven primary.
 
 **Structural label fallback:** modern component layouts often place a short label and its value in sibling `div` wrappers with icon/help nodes between them. DragonFruitMe keeps the normal adjacent rule first, then inspects at most eight following blocks. A candidate must remain in the same section and region and share the label's immediate component ancestry; typed validation still decides whether it can count. This is deterministic neighbourhood reasoning, not CSS/XPath execution.
 

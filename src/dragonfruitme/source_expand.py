@@ -46,11 +46,12 @@ def expand_source(
     source_pages: list[dict[str, Any]] = []
     limited_by: str | None = None
 
-    def enqueue(url: str | None, depth: int) -> None:
+    def enqueue(url: str | None, depth: int) -> bool:
         if not url or url in fetched or url in queued:
-            return
+            return False
         queued.add(url)
         queue.append((url, depth))
+        return True
 
     def add_detail(url: str) -> bool:
         nonlocal limited_by
@@ -102,13 +103,15 @@ def expand_source(
             urls = group["urls"]
             if group["kind"] == "detail_candidates":
                 for child_url in urls:
+                    before = len(detail_seen)
                     if not add_detail(child_url):
                         break
-                    page_details += 1
+                    if len(detail_seen) > before:
+                        page_details += 1
             elif depth < max_depth:
                 for child_url in urls:
-                    enqueue(child_url, depth + 1)
-                    page_children += 1
+                    if enqueue(child_url, depth + 1):
+                        page_children += 1
 
         template = pagination.get("template")
         last_page = pagination.get("last_page")

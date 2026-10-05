@@ -241,7 +241,13 @@ def _pagination(graph) -> tuple[dict[str, Any], set[str]]:
     return result, pagination_urls
 
 
-def _child_collections(graph, pagination_urls: set[str], max_groups: int = 8) -> list[dict[str, Any]]:
+def _child_groups(graph, pagination_urls: set[str]) -> list[dict[str, Any]]:
+    """Return complete repeated internal-link groups for host-side traversal.
+
+    Agent-facing traversal stays bounded to samples, but a host that owns the
+    crawl budget needs the actual URLs so it can exhaust a productive source
+    without sending thousands of links through the agent context.
+    """
     current_url = _clean_url(graph.url)
     current_scope = scope_of(current_url)
     groups: dict[str, dict[str, str]] = defaultdict(dict)
@@ -274,16 +280,55 @@ def _child_collections(graph, pagination_urls: set[str], max_groups: int = 8) ->
                 "scope": scope,
                 "kind": "detail_candidates" if dynamic else "child_candidates",
                 "count": len(urls),
-                "sample": [
-                    {"url": url, "text": items[url]}
-                    for url in urls[:5]
-                ],
+                "urls": urls,
+                "texts": items,
             }
         )
 
     out.sort(key=lambda item: (-int(item["count"]), str(item["scope"])))
-    return out[:max_groups]
+    return out
 
+
+def _child_collections(graph, pagination_urls: set[str], max_groups: int = 8) -> list[dict[str, Any]]:
+    """Bounded agent-facing view of repeated internal-link groups."""
+    out: list[dict[str, Any]] = []
+    for group in _child_groups(graph, pagination_urls)[:max_groups]:
+        texts = group["texts"]
+        urls = group["urls"]
+        out.append(
+            {
+                "scope": group["scope"],
+                "kind": group["kind"],
+                "count": group["count"],
+                "sample": [
+                    {"url": url, "text": texts[url]}
+                    for url in urls[:5]
+                ],
+            }
+        )
+    return out
+
+
+def source_frontier(graph) -> dict[str, Any]:
+    """Complete host-side frontier for one already-fetched source page.
+
+    Unlike :func:`analyze_traversal`, this function is not intended for an
+    LLM context window. It returns every repeated child/detail URL visible on
+    the page plus pagination metadata, so a deterministic host runner can
+    exhaust high-fanout sources before returning to external discovery.
+    """
+    pagination, pagination_urls = _pagination(graph)
+    children = []
+    for group in _child_groups(graph, pagination_urls):
+        children.append(
+            {
+                "scope": group["scope"],
+                "kind": group["kind"],
+                "count": group["count"],
+                "urls": list(group["urls"]),
+            }
+        )
+    return {"pagination": pagination, "child_collections": children}
 
 def analyze_traversal(graph) -> dict[str, Any]:
     """Infer traversal structure visible from the current page.

@@ -11,6 +11,7 @@ from .graph import build_graph, summarize
 from .locate import locate as locate_core
 from .policy import FetchPolicy
 from .recipes import RecipeStore, scope_of
+from .source_expand import expand_source as expand_source_core
 from .traversal import analyze_traversal
 
 
@@ -100,6 +101,17 @@ class Engine:
         )
 
     # -- host/CLI helpers (not agent operations) -----------------------------
+    def expand_source(self, seed_urls: list[str], max_pages: int = 5000,
+                      max_urls: int = 100000, max_depth: int = 3) -> dict[str, Any]:
+        """Host-side high-fanout source expansion; not an agent operation."""
+        return expand_source_core(
+            self.fetcher.http,
+            seed_urls,
+            max_pages=max_pages,
+            max_urls=max_urls,
+            max_depth=max_depth,
+        )
+
     def recipes(self, scope: str | None = None) -> dict[str, Any]:
         return {"ok": True, "recipes": [r.as_dict() for r in self.store.list(scope)]}
 
@@ -125,6 +137,9 @@ class DragonFruitMe:
 
     def extract(self, **kwargs: Any) -> dict[str, Any]:
         return safe_call(self.engine.extract, **kwargs)
+
+    def expand_source(self, **kwargs: Any) -> dict[str, Any]:
+        return safe_call(self.engine.expand_source, **kwargs)
 
     def recipes(self, **kwargs: Any) -> dict[str, Any]:
         return safe_call(self.engine.recipes, **kwargs)

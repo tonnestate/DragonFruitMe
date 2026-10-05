@@ -12,7 +12,7 @@
 <p align="center">
   <img alt="License" src="https://img.shields.io/badge/license-GPL--3.0-blue">
   <img alt="Status" src="https://img.shields.io/badge/status-experimental-orange">
-  <img alt="Version" src="https://img.shields.io/badge/version-0.4.0-ff2d8a">
+  <img alt="Version" src="https://img.shields.io/badge/version-0.4.1-ff2d8a">
   <img alt="Python" src="https://img.shields.io/badge/python-%3E%3D3.10-3776AB">
   <img alt="Dependencies" src="https://img.shields.io/badge/runtime%20deps-none-brightgreen">
   <img alt="MCP" src="https://img.shields.io/badge/MCP-optional-5b5bd6">
@@ -111,7 +111,7 @@ primary stale (2 misses in a row)
 nothing answers                  → escalate, compile a new candidate
 ```
 
-Alternatives are ranked by their own track record (hits, misses, contradictions), not by a fixed kind order. A fallback answer is always visible as `RECIPE_FALLBACK`, so a site redesign cannot hide behind a silent fallback. A healthy primary costs the same as before (benchmark: within noise of v0.3.2). The result is **self-healing without an LLM in the loop — and without forgetting what worked**.
+Alternatives are ranked by their own track record (hits, misses, contradictions), not by a fixed kind order. A fallback answer is always visible as `RECIPE_FALLBACK`, so a site redesign cannot hide behind a silent fallback. A healthy primary costs the same as before (benchmark: within noise of v0.3.2). Lookups go through a dispatch index per `(scope, field, role)`, so the cost does not grow with the size of the store: `scripts/benchmark.py --scaling` stays flat from 1 to 100,000 stored recipes, and a primary miss tries at most the three alternatives of its own bucket — never a global scan. The result is **self-healing without an LLM in the loop — and without forgetting what worked**.
 
 **Teach, but grounded.** If every cheap stage fails, the agent gets `NEEDS_AGENT` with a few ranked candidate blocks. If it can read the value there, it calls `extract` again with `"teach": "<exact value>"`. DragonFruitMe accepts the value only if it **occurs in the page** (`NOT_GROUNDED` otherwise), then compiles it like any other hit. The LLM is the last resort *and* a one-time teacher, never the per-page extractor.
 
@@ -138,9 +138,9 @@ An agent can never raise the provenance of its own claim; only independent stage
 
 ---
 
-## What DragonFruitMe v0.4.0 can do today
+## What DragonFruitMe v0.4.1 can do today
 
-| Capability | v0.4.0 behavior |
+| Capability | v0.4.1 behavior |
 |---|---|
 | Fetch ladder | Inline HTML → stdlib HTTP (gzip/deflate, charset detection) → optional Playwright rendering. |
 | Polite by default | Honest User-Agent, robots.txt honoured, per-host minimum interval, response size cap, page cache (observe + locate + extract = one request). |
@@ -153,7 +153,7 @@ An agent can never raise the provenance of its own claim; only independent stage
 | Label heuristics | `dt/dd`, `th/td`, adjacent blocks and inline `Label: value`, plus bounded structural sibling-wrapper resolution for nested DIV/CSS component layouts; typed validation and component-boundary checks remain mandatory. Umlaut-tolerant (`Wohnflaeche` = `Wohnfläche`). |
 | Typed validation | German and English number formats (`349.000,50 €`, `1,200.50`), areas (`m²`, `qm`), dates, e-mails, phones, URLs, bounds and custom patterns. |
 | Compile-once recipes | JSON-path, label-anchored regex or label recipes per host + URL template in SQLite. |
-| Recipe portfolio | Up to four recipes per field and scope (`primary`, `fallback`, `candidate`; weakest beyond the cap `retired`), ranked by hits/misses/contradictions. Primary runs alone; alternatives only after a primary miss or contradiction; promotion only when the primary is stale and the alternative proved itself twice. `RECIPE_FALLBACK` signal on every fallback answer. Older single-recipe stores migrate automatically. |
+| Recipe portfolio | Up to four recipes per field and scope (`primary`, `fallback`, `candidate`; weakest beyond the cap `retired`), ranked by hits/misses/contradictions. Primary runs alone; alternatives only after a primary miss or contradiction; promotion only when the primary is stale and the alternative proved itself twice. `RECIPE_FALLBACK` signal on every fallback answer. Dispatch index per `(scope, field, role)` and bounded retired history keep lookups constant-time in store size. Older stores migrate automatically. |
 | Throughput | One SQLite connection per store (WAL, `synchronous=NORMAL`), one transaction per page, structured data parsed once per page. `scripts/benchmark.py`: ~1.3 ms per warm page with 5 fields (~750 pages/s offline, before v0.2.1: ~14 ms). |
 | Agent teaching | `teach` values must be grounded in the page; then compiled into recipes. |
 | Provenance | `AGENT_TAUGHT` < `ENGINE_OBSERVED` < `CROSS_CONFIRMED` per field, with `confirmed_by`; optional `min_provenance` turns weaker values into `UNCONFIRMED`. |
@@ -302,7 +302,7 @@ See [`docs/donor-map.md`](docs/donor-map.md) and [`docs/research-basis.md`](docs
 
 ## Status
 
-v0.4.0 is experimental. The public agent surface (`observe → locate → extract`) remains intentionally small; `extract-batch` is a host-side throughput path for explicit URL sets. Recipe derivation, ranking and the render stage will evolve. Licensed under GPL-3.0-only.
+v0.4.1 is experimental. The public agent surface (`observe → locate → extract`) remains intentionally small; `extract-batch` is a host-side throughput path for explicit URL sets. Recipe derivation, ranking and the render stage will evolve. Licensed under GPL-3.0-only.
 
 ---
 

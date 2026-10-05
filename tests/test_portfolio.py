@@ -102,6 +102,56 @@ def test_legacy_single_recipe_database_is_migrated(tmp_path):
     store = RecipeStore(path)
     primary = store.get(SCOPE, "kaufpreis")
     assert primary.role == "primary" and primary.hits == 512 and primary.pattern == "jsonld|offers.price"
-    assert store._db.execute("PRAGMA user_version").fetchone()[0] == 2
+    assert store._db.execute("PRAGMA user_version").fetchone()[0] == 3
     store.close()
     RecipeStore(path).close()  # re-opening an already migrated store is a no-op
+
+
+def test_live_lookup_uses_the_bucket_index(tmp_path):
+    from dragonfruitme.recipes import _LIVE_SQL
+
+    store = RecipeStore(tmp_path / "r.sqlite")
+    plan = store._db.execute(
+        f"EXPLAIN QUERY PLAN SELECT * FROM recipe_set WHERE scope=? AND field=? AND {_LIVE_SQL}", ("s", "f")
+    ).fetchall()
+    assert "USING INDEX recipe_set_bucket" in plan[0][3]  # no table scan, no scan over retired rows
+    store.close()
+
+
+def test_retired_history_is_bounded(tmp_path):
+    from dragonfruitme.recipes import RETIRED_KEEP
+
+    store = RecipeStore(tmp_path / "r.sqlite")
+    for i in range(200):  # a field that is relearned over and over
+        store.add(Recipe(scope=SCOPE, field="f", kind="regex", pattern=f"p{i}(.*)", origin="label"))
+    rows = store.list(SCOPE)
+    assert len([r for r in rows if r.role == "retired"]) == RETIRED_KEEP
+    assert len([r for r in rows if r.role != "retired"]) == MAX_LIVE
+    store.close()
+
+
+def test_v2_store_is_upgraded_to_bucket_index_and_trimmed(tmp_path):
+    from dragonfruitme.recipes import RETIRED_KEEP
+
+    path = tmp_path / "v2.sqlite"
+    store = RecipeStore(path)
+    db = store._db
+    now = time.time()
+    with store.transaction():  # simulate a 0.4.0 store: old index, unbounded retired rows
+        db.execute("DROP INDEX recipe_set_bucket")
+        db.execute("CREATE INDEX recipe_set_scope_field ON recipe_set (scope, field)")
+        db.executemany(
+            "INSERT INTO recipe_set (scope, field, kind, pattern, origin, role, hits, misses, total_misses, "
+            "contradictions, confirmed_hits, last_validated, created_at, updated_at) "
+            "VALUES (?,?,?,?,?,?,0,0,0,0,0,NULL,?,?)",
+            [(SCOPE, "f", "regex", f"old{i}(.*)", "label", "retired", now, now + i) for i in range(100)],
+        )
+        db.execute("PRAGMA user_version=2")
+    store.close()
+    upgraded = RecipeStore(path)
+    indexes = {row[1] for row in upgraded._db.execute("PRAGMA index_list(recipe_set)")}
+    assert "recipe_set_bucket" in indexes and "recipe_set_scope_field" not in indexes
+    retired = [r for r in upgraded.list(SCOPE) if r.role == "retired"]
+    assert len(retired) == RETIRED_KEEP and retired[0].pattern.startswith("old")
+    assert upgraded._db.execute("PRAGMA user_version").fetchone()[0] == 3
+    upgraded.close()

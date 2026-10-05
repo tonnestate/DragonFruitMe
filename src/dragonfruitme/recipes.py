@@ -36,9 +36,11 @@ _DIGIT_RUN = re.compile(r"\d{3,}")
 ROLES = ("primary", "fallback", "candidate", "retired")
 LIVE_ROLES = ("primary", "fallback", "candidate")
 MAX_LIVE = 4            # primary + up to three alternatives per (scope, field)
+RETIRED_KEEP = 16       # bounded audit history of retired recipes per (scope, field)
 PROMOTE_MIN_HITS = 2    # an alternative must have proven itself at least twice
 KIND_PRIOR = {"json": 3, "regex": 2, "label": 1}  # tie-break only, never overrides evidence
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
+_LIVE_SQL = "role IN ('primary','fallback','candidate')"  # an IN list keeps the bucket index usable
 _COLUMNS = ("id, scope, field, kind, pattern, origin, role, hits, misses, total_misses, "
             "contradictions, confirmed_hits, last_validated")
 
@@ -160,7 +162,11 @@ class RecipeStore:
             )
             """
         )
-        db.execute("CREATE INDEX IF NOT EXISTS recipe_set_scope_field ON recipe_set (scope, field)")
+        # Dispatch index: one bucket per (scope, field, role). Lookups touch only the live
+        # recipes of one bucket, independent of how many recipes the store holds overall
+        # and of how many were retired in that bucket.
+        db.execute("DROP INDEX IF EXISTS recipe_set_scope_field")
+        db.execute("CREATE INDEX IF NOT EXISTS recipe_set_bucket ON recipe_set (scope, field, role)")
         db.execute(
             """
             CREATE TABLE IF NOT EXISTS observations (
@@ -191,6 +197,13 @@ class RecipeStore:
                 """
             )
             db.execute("DROP TABLE recipes")
+        # v2 -> v3: bounded retired history (the bucket index is created above)
+        buckets = db.execute(
+            "SELECT scope, field FROM recipe_set WHERE role='retired' GROUP BY scope, field HAVING COUNT(*) > ?",
+            (RETIRED_KEEP,),
+        ).fetchall()
+        for scope, field in buckets:
+            RecipeStore._trim_retired(db, scope, field)
         db.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
 
     @contextmanager
@@ -227,7 +240,7 @@ class RecipeStore:
         """Live recipes in execution order: primary first, then alternatives by evidence."""
         with self._connect() as db:
             rows = db.execute(
-                f"SELECT {_COLUMNS} FROM recipe_set WHERE scope=? AND field=? AND role!='retired'",
+                f"SELECT {_COLUMNS} FROM recipe_set WHERE scope=? AND field=? AND {_LIVE_SQL}",
                 (scope, field),
             ).fetchall()
         recipes = [Recipe.from_row(row) for row in rows]
@@ -249,7 +262,7 @@ class RecipeStore:
             clauses.append("scope=?")
             args.append(scope)
         if not include_retired:
-            clauses.append("role!='retired'")
+            clauses.append(_LIVE_SQL)
         if clauses:
             query += " WHERE " + " AND ".join(clauses)
         with self._connect() as db:
@@ -268,7 +281,7 @@ class RecipeStore:
 
     def _has_primary(self, db: sqlite3.Connection, scope: str, field: str) -> bool:
         return db.execute(
-            "SELECT 1 FROM recipe_set WHERE scope=? AND field=? AND role='primary'", (scope, field)
+            "SELECT 1 FROM recipe_set WHERE scope=? AND field=? AND role='primary' LIMIT 1", (scope, field)
         ).fetchone() is not None
 
     def _insert(self, db: sqlite3.Connection, recipe: Recipe, role: str, hits: int) -> int:
@@ -291,8 +304,24 @@ class RecipeStore:
         ).fetchall()
         alternatives = sorted((Recipe.from_row(r) for r in rows), key=lambda r: r.sort_key())
         excess = len(alternatives) - (MAX_LIVE - 1)
-        for weakest in alternatives[::-1][:max(0, excess)]:
+        if excess <= 0:
+            return
+        for weakest in alternatives[::-1][:excess]:
             db.execute("UPDATE recipe_set SET role='retired', updated_at=? WHERE id=?", (time.time(), weakest.id))
+        self._trim_retired(db, scope, field)
+
+    @staticmethod
+    def _trim_retired(db: sqlite3.Connection, scope: str, field: str) -> None:
+        """Keep only the newest ``RETIRED_KEEP`` retired recipes of a bucket."""
+        db.execute(
+            """
+            DELETE FROM recipe_set WHERE id IN (
+                SELECT id FROM recipe_set WHERE scope=? AND field=? AND role='retired'
+                ORDER BY updated_at DESC, id DESC LIMIT -1 OFFSET ?
+            )
+            """,
+            (scope, field, RETIRED_KEEP),
+        )
 
     def add(self, recipe: Recipe) -> tuple[Recipe, bool]:
         """Add a freshly compiled, already validated recipe to the portfolio.

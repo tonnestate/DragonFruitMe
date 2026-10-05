@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.1 — 2026-10-05
+
+Compile the routing, not only the recipe: lookup cost no longer depends on store size.
+
+- found by a scaling probe: retired recipes were never deleted and were filtered only after the bucket was read, so 50,000 retired rows in one field raised warm-page latency from 1.5 ms to 9.1 ms (linear growth);
+- new dispatch index `recipe_set_bucket (scope, field, role)` with an explicit `role IN (…)` predicate; the old `(scope, field)` index is dropped; query plan verified by a test;
+- retired history bounded to the newest 16 recipes per `(scope, field)`; existing stores are trimmed on upgrade (schema version 2 → 3);
+- stable recipe `id` with role/scope as mutable indexed attributes (already in 0.4.0) is now documented as an invariant, together with "at most three alternatives per miss, no global scan";
+- `scripts/benchmark.py --scaling`: healthy-primary median 1.40–1.61 ms for 1 / 10 / 100 / 1,000 / 100,000 stored recipes (flat, within noise); 50,000 retired rows in the hot bucket: 1.48 ms (was 9.1 ms);
+- tests for index use, bounded retired history and the v2 → v3 upgrade.
+
 ## 0.4.0 — 2026-10-05
 
 Recipe portfolio: compile alternatives instead of overwriting the winner.

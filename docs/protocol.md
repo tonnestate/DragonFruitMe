@@ -74,9 +74,20 @@ dragonfruitme extract-batch --urls-file FILE --fields-json JSON [--output OUT.js
 
 * Input: one URL per line (`#` comments allowed) or a JSON array; duplicates are removed, order is kept.
 * Output: one JSONL row per URL, `{"url": ..., <extract result>}`, flushed immediately; stdout if `--output` is omitted.
-* Summary on stderr: `{"ok": true, "batch": {total, skipped, attempted, complete, partial, incomplete, errors, unconfirmed_fields, flagged_rows, error_codes, field_statuses, stage_hits, signals}}`; `flagged_rows` counts rows with at least one field signal. The four maps aggregate error codes, field statuses, successful extraction stages and field signals across the attempted batch so production failure clusters are visible without changing the JSONL row contract.
+* Summary on stderr: `{"ok": true, "batch": {total, skipped, attempted, complete, partial, incomplete, errors, unconfirmed_fields, flagged_rows, error_codes, field_statuses, field_outcomes, stage_hits, signals, advisories}}`; `flagged_rows` counts rows with at least one field signal. Aggregate maps expose error codes, field statuses, per-field outcomes, successful extraction stages and field signals without changing the JSONL row contract. `advisories` is a bounded, non-blocking interpretation of those aggregates.
 * `--resume` (requires `--output`): repairs a torn last line, skips URLs whose latest row is final (`ok: true` or `error.recoverable: false`), retries the rest. The latest row per URL is authoritative.
 * Exit code 0 unless `--fail-on-error` is set and at least one URL failed (then 2).
+
+Batch advisories never change execution or exit status:
+
+| code | trigger | meaning |
+|---|---|---|
+| `EMPTY_INPUT_SET` | zero supplied URLs | informational confirmation that an empty explicit input set is intentional |
+| `LOW_BATCH_YIELD` | ≥10 attempted URLs and ≤10% `COMPLETE`+`PARTIAL` | very few rows produced any found field; confirm source/input/field strategy |
+| `HIGH_AGENT_ESCALATION` | ≥10 field observations and ≥80% `NEEDS_AGENT` | deterministic extraction is rarely resolving the requested fields |
+| `SYSTEMATIC_FIELD_GAPS` | a field has ≥10 observations and zero `FOUND` | confirm whether that field is expected in this source segment |
+
+The thresholds are conservative fixed sanity guards, not statistical claims. Advisory evidence includes the measured counts/ratios. DragonFruitMe reports the anomaly but does not infer why it occurred or whether the task should stop.
 
 ## Attempt outcomes
 

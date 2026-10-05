@@ -12,7 +12,7 @@
 <p align="center">
   <img alt="License" src="https://img.shields.io/badge/license-GPL--3.0-blue">
   <img alt="Status" src="https://img.shields.io/badge/status-experimental-orange">
-  <img alt="Version" src="https://img.shields.io/badge/version-0.4.1-ff2d8a">
+  <img alt="Version" src="https://img.shields.io/badge/version-0.4.2-ff2d8a">
   <img alt="Python" src="https://img.shields.io/badge/python-%3E%3D3.10-3776AB">
   <img alt="Dependencies" src="https://img.shields.io/badge/runtime%20deps-none-brightgreen">
   <img alt="MCP" src="https://img.shields.io/badge/MCP-optional-5b5bd6">
@@ -140,9 +140,9 @@ An agent can never raise the provenance of its own claim; only independent stage
 
 ---
 
-## What DragonFruitMe v0.4.1 can do today
+## What DragonFruitMe v0.4.2 can do today
 
-| Capability | v0.4.1 behavior |
+| Capability | v0.4.2 behavior |
 |---|---|
 | Fetch ladder | Inline HTML → stdlib HTTP (gzip/deflate, charset detection) → optional Playwright rendering. |
 | Polite by default | Honest User-Agent, robots.txt honoured, per-host minimum interval, response size cap, page cache (observe + locate + extract = one request). |
@@ -163,7 +163,7 @@ An agent can never raise the provenance of its own claim; only independent stage
 | Scenario evidence | `docs/EVIDENCE.md`: 9 pathologies and 7 false-positive controls driven through the real engine, regenerated and re-checked by the tests. |
 | Evidence trail | Every field returns `stage`, `page_stage`, `evidence`, `recipe`, `provenance`, `confirmed_by`, `signals` and the full `attempts` path through the escalation graph. |
 | Interfaces | Python API, CLI, Agent Skill and optional MCP server — all on the same core. State directory and fetch policy are **host-bound**, never agent-supplied. |
-| Batch extraction | Host-side `extract-batch` processes explicit URL sets with one warm recipe store, immediate JSONL persistence, de-duplication and progress-preserving per-URL failure handling. `--resume` repairs a torn last line, skips final rows and retries transient failures. The summary exposes `unconfirmed_fields`, `flagged_rows`, `error_codes`, `field_statuses`, `stage_hits` and field `signals` so real failure clusters are measurable. |
+| Batch extraction | Host-side `extract-batch` processes explicit URL sets with one warm recipe store, immediate JSONL persistence, de-duplication and progress-preserving per-URL failure handling. `--resume` repairs a torn last line, skips final rows and retries transient failures. The summary exposes `error_codes`, `field_statuses`, per-field `field_outcomes`, `stage_hits`, `signals` and non-blocking `advisories` for unusually low yield, excessive agent escalation or fields that are systematically never found. |
 
 The core has **no mandatory third-party runtime dependencies**. MCP and the browser stage are optional extras.
 
@@ -215,6 +215,8 @@ dragonfruitme extract-batch \
 ```
 
 The input is either one URL per line or a JSON array. DragonFruitMe keeps one recipe store warm across the run, writes and flushes one JSONL record after every URL, and continues after per-URL failures. On `--resume` it repairs a row torn by an interruption, skips URLs whose latest row is final (success, or a non-recoverable error such as `BLOCKED`) and retries transient failures such as `FETCH_FAILED` or HTTP 5xx. Retried URLs get a new row; consumers take the last row per URL. This is deliberately **not** a crawler frontier: DragonFruitMe processes the explicit URL set it is given and does not invent discovery strategy.
+
+**Batch sanity feedback (v0.4.2).** DragonFruitMe does not decide that a task is wrong, but it no longer stays silent when the aggregate outcome is extreme. After a meaningful sample it can emit non-blocking advisories such as `LOW_BATCH_YIELD`, `HIGH_AGENT_ESCALATION` or `SYSTEMATIC_FIELD_GAPS`. These describe observed ratios and ask the caller to confirm the strategy; they never guess domain-specific causes and never alter processing or the exit code.
 
 ### Python
 
@@ -304,7 +306,7 @@ See [`docs/donor-map.md`](docs/donor-map.md) and [`docs/research-basis.md`](docs
 
 ## Status
 
-v0.4.1 is experimental. The public agent surface (`observe → locate → extract`) remains intentionally small; `extract-batch` is a host-side throughput path for explicit URL sets. Recipe derivation, ranking and the render stage will evolve. Licensed under GPL-3.0-only.
+v0.4.2 is experimental. The public agent surface (`observe → locate → extract`) remains intentionally small; `extract-batch` is a host-side throughput path for explicit URL sets. Recipe derivation, ranking and the render stage will evolve. Licensed under GPL-3.0-only.
 
 ---
 

@@ -1,6 +1,6 @@
-# Architecture and Specification (v0.4.1)
+# Architecture and Specification (v0.4.2)
 
-DragonFruitMe has one job: give an AI agent precise, cheap and provable access to the content of web pages. It is built from three graphs and a recipe store. This specification reflects the v0.4.1 system, including traversal coverage evidence, the bounded recipe portfolio, promotion/demotion lifecycle and constant-time live-recipe dispatch.
+DragonFruitMe has one job: give an AI agent precise, cheap and provable access to the content of web pages. It is built from three graphs and a recipe store. This specification reflects the v0.4.2 system, including traversal coverage evidence, the bounded recipe portfolio, promotion/demotion lifecycle, constant-time live-recipe dispatch and non-blocking batch sanity feedback.
 
 ```text
                  ┌──────────── host-bound ────────────┐
@@ -123,7 +123,15 @@ After a stage finds a value, the structured and label stages are asked **indepen
 
 **Evidence:** `scripts/scenario_matrix.py` drives the engine through 9 pathologies and 7 false-positive controls and renders `docs/EVIDENCE.md`; the test suite fails if a scenario fails or the file is stale. Disabling the independent check makes one pathology and two controls fail; restoring the pre-0.4 "new recipe overwrites the primary" behaviour makes P8, P9 and C7 fail — the matrix measures the mechanisms rather than restating them.
 
-## 8. Invariants
+## 8. Batch sanity feedback (host-side)
+
+`extract-batch` already aggregates observed errors, field statuses, extraction stages and field signals. v0.4.2 adds a deliberately small advisory layer over those measurements. It is not an expert system and has no domain knowledge.
+
+The layer uses fixed, inspectable guards: at least 10 attempted rows before low-yield feedback, at least 10 field observations before agent-escalation feedback, ≤10% usable rows for `LOW_BATCH_YIELD`, ≥80% `NEEDS_AGENT` for `HIGH_AGENT_ESCALATION`, and zero `FOUND` across at least 10 observations for a `SYSTEMATIC_FIELD_GAPS` entry. Field-gap evidence is capped at five examples.
+
+An advisory is evidence for the caller to reconsider or confirm its plan, never authority to change that plan. It does not stop the batch, does not mutate the requested fields, does not invent a discovery strategy and does not affect the exit code. This preserves the universal-tool boundary: DragonFruitMe can say "this outcome is unusual" without claiming "this postal code, industry, source or task is wrong."
+
+## 9. Invariants
 
 1. No stage may return a value that fails type validation.
 2. No taught value is accepted unless it occurs in the page.
@@ -134,7 +142,7 @@ After a stage finds a value, the structured and label stages are asked **indepen
 7. The core imports only the Python standard library.
 8. One observed page never authorizes a whole-source completeness claim; visible pagination or repeated child scopes remain explicit traversal evidence.
 
-## 9. Deferred
+## 10. Deferred
 
 * CSS/XPath recipe kind and DOM-path anchors next to regex anchors.
 * Multi-value fields (lists, tables → rows).

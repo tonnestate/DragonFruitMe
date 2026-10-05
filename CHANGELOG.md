@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.4.2 — 2026-10-05
+
+Batch sanity feedback: measure unusual outcomes and ask the caller to confirm strategy without taking control away from it.
+
+- `extract-batch` now returns non-blocking `advisories[]` in its stderr summary; advisories never stop processing and never change exit codes;
+- `LOW_BATCH_YIELD` fires only after at least 10 attempted URLs and only when ≤ 10% produced any found field (`COMPLETE` or `PARTIAL`);
+- `HIGH_AGENT_ESCALATION` fires only after at least 10 field observations and when ≥ 80% end in `NEEDS_AGENT`;
+- `SYSTEMATIC_FIELD_GAPS` identifies requested fields that were observed at least 10 times but never reached `FOUND`; output is bounded to five field examples;
+- `EMPTY_INPUT_SET` is informational and asks the caller to confirm that an empty explicit URL set is intentional;
+- per-field aggregate `field_outcomes` are exposed in the batch summary so advisory evidence is inspectable rather than opaque;
+- advisories describe the observed anomaly but never infer domain-specific causes (for example postal-code semantics, industry rules or source intent);
+- regression tests cover minimum-sample guards, exact 90% low-yield behavior, bounded advisory output, empty input and the invariant that warnings do not alter exit status.
+
 ## 0.4.1 — 2026-10-05
 
 Compile the routing, not only the recipe: lookup cost no longer depends on store size.

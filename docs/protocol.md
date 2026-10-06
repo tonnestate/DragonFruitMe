@@ -72,7 +72,7 @@ dragonfruitme expand-source --urls-file SOURCES [--output DETAIL_URLS]
                             [--max-pages N] [--max-urls N] [--max-depth N]
 ```
 
-The command consumes explicit listing/directory seed URLs. It follows detected pagination and repeated lower-level listing scopes, materializes repeated detail scopes as a de-duplicated URL queue, and stops at host-owned budgets. It does not call a search engine, does not fetch detail pages during expansion, and never treats a budget stop as proof of completeness. Stdout (or `--output`) is one detail URL per line; stderr contains the bounded expansion summary including `source_pages_fetched`, `detail_count`, `fanout_per_source_page`, `frontier_exhausted`, `limited_by`, `remaining_source_pages` and errors.
+The command consumes explicit listing/directory seed URLs. It follows detected pagination and repeated lower-level listing scopes, materializes repeated detail scopes as a de-duplicated URL queue, and stops at host-owned budgets. The scheduling frontier itself is capped by `max_pages`, so a malformed or absurd terminal-page value cannot allocate an unbounded queue before the fetch loop reaches its budget. It does not call a search engine, does not fetch detail pages during expansion, and never treats a budget stop as proof of completeness. Stdout (or `--output`) is one detail URL per line; stderr contains the bounded expansion summary including `source_pages_fetched`, `detail_count`, `fanout_per_source_page`, `frontier_exhausted`, `limited_by`, `remaining_source_pages` and errors.
 
 ## `extract-batch` (host-side CLI only, not an agent operation)
 
@@ -85,7 +85,9 @@ dragonfruitme extract-batch --urls-file FILE --fields-json JSON [--output OUT.js
 * Output: one JSONL row per URL, `{"url": ..., <extract result>}`, flushed immediately; stdout if `--output` is omitted.
 * Summary on stderr: `{"ok": true, "batch": {total, skipped, attempted, complete, partial, incomplete, errors, unconfirmed_fields, flagged_rows, error_codes, field_statuses, field_outcomes, stage_hits, signals, advisories}}`; `flagged_rows` counts rows with at least one field signal. Aggregate maps expose error codes, field statuses, per-field outcomes, successful extraction stages and field signals without changing the JSONL row contract. `advisories` is a bounded, non-blocking interpretation of those aggregates.
 * `--resume` (requires `--output`): repairs a torn last line, skips URLs whose latest row is final (`ok: true` or `error.recoverable: false`), retries the rest. The latest row per URL is authoritative.
-* Exit code 0 unless `--fail-on-error` is set and at least one URL failed (then 2).
+* Exit code 0 unless `--fail-on-error` is set and at least one URL failed (then 2). For a large-batch strategy preflight, exit 3 means `STRATEGY_REVIEW_REQUIRED`: the first 10 rows have been written, but the remaining batch was not spent because the sample showed `LOW_BATCH_YIELD` or `HIGH_AGENT_ESCALATION`. Rerun after review with `--resume --continue-on-preflight-warning` when an output file is used.
+
+Ordinary batch advisories do not change execution or exit status. For runs with at least 1,000 pending URLs, the first 10 attempted rows are additionally used as a strategy preflight. Only `LOW_BATCH_YIELD` and `HIGH_AGENT_ESCALATION` trigger review; `SYSTEMATIC_FIELD_GAPS` alone does not. A review stop happens before the remaining URLs are touched and can be explicitly confirmed with `--continue-on-preflight-warning`.
 
 Batch advisories never change execution or exit status:
 

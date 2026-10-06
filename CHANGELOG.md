@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.4.4 — 2026-10-06
+
+Large-run hardening: detect a bad strategy before spending hours on it, and bound source-frontier scheduling before malformed pagination can consume memory.
+
+- `extract-batch` now runs an automatic strategy preflight when at least 1,000 URLs remain;
+- the first 10 attempted URLs are the preflight sample and are real batch work, not duplicate probes;
+- only strong aggregate anomalies (`LOW_BATCH_YIELD` or `HIGH_AGENT_ESCALATION`) require caller review; field gaps alone remain advisory;
+- anomalous large batches stop after the sample with exit code 3 / `STRATEGY_REVIEW_REQUIRED`, preserving the written sample and asking the caller to confirm the strategy;
+- `--continue-on-preflight-warning` explicitly confirms the evidence and allows the full batch to continue; there is no hard maximum batch size;
+- healthy large batches pass preflight automatically and continue without intervention;
+- source expansion now caps scheduled listing pages at `max_pages`, including initial seeds and bounded pagination templates;
+- absurd terminal-page claims (for example page 1,000,000,000) can no longer enqueue an unbounded frontier before the fetch budget is enforced;
+- regression tests cover bad-batch early stop, healthy large-batch continuation, explicit override and billion-page pagination under a three-page budget.
+
 ## 0.4.3 — 2026-10-05
 
 High-fanout source expansion: stop treating external search as the enumeration loop when a productive directory/listing source has already been found.

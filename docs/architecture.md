@@ -1,6 +1,6 @@
-# Architecture and Specification (v0.4.3)
+# Architecture and Specification (v0.4.4)
 
-DragonFruitMe has one job: give an AI agent precise, cheap and provable access to the content of web pages. It is built from three graphs and a recipe store. This specification reflects the v0.4.3 system, including traversal coverage evidence, the bounded recipe portfolio, promotion/demotion lifecycle, constant-time live-recipe dispatch and non-blocking batch sanity feedback.
+DragonFruitMe has one job: give an AI agent precise, cheap and provable access to the content of web pages. It is built from three graphs and a recipe store. This specification reflects the v0.4.4 system, including traversal coverage evidence, the bounded recipe portfolio, promotion/demotion lifecycle, constant-time live-recipe dispatch and non-blocking batch sanity feedback.
 
 ```text
                  ┌──────────── host-bound ────────────┐
@@ -69,7 +69,7 @@ Therefore `coverage_status` is `INCOMPLETE` when pagination or candidate child l
 
 For high-volume enumeration, traversal evidence can be consumed deterministically without routing every discovered URL back through the agent. `expand-source` starts from explicit source/listing URLs, materializes bounded pagination templates, follows repeated `child_candidates` to lower listing levels and emits repeated `detail_candidates` as a de-duplicated detail-URL queue.
 
-The runner is budgeted by `max_pages`, `max_urls` and `max_depth`. It does not perform external search and does not fetch detail pages during expansion. A budget stop leaves `frontier_exhausted=false`; completeness is never inferred from hitting a limit. The agent-facing `observe.traversal` remains small and sampled, while the host-side frontier can retain every visible candidate URL.
+The runner is budgeted by `max_pages`, `max_urls` and `max_depth`. It does not perform external search and does not fetch detail pages during expansion. A budget stop leaves `frontier_exhausted=false`; completeness is never inferred from hitting a limit. The scheduling queue is also capped before insertion, so terminal-page metadata cannot create a frontier larger than `max_pages`. The agent-facing `observe.traversal` remains small and sampled, while the host-side frontier can retain every visible candidate URL.
 
 ## 5. Locate (`locate.py`)
 
@@ -135,7 +135,7 @@ After a stage finds a value, the structured and label stages are asked **indepen
 
 The layer uses fixed, inspectable guards: at least 10 attempted rows before low-yield feedback, at least 10 field observations before agent-escalation feedback, ≤10% usable rows for `LOW_BATCH_YIELD`, ≥80% `NEEDS_AGENT` for `HIGH_AGENT_ESCALATION`, and zero `FOUND` across at least 10 observations for a `SYSTEMATIC_FIELD_GAPS` entry. Field-gap evidence is capped at five examples.
 
-An advisory is evidence for the caller to reconsider or confirm its plan, never authority to change that plan. It does not stop the batch, does not mutate the requested fields, does not invent a discovery strategy and does not affect the exit code. This preserves the universal-tool boundary: DragonFruitMe can say "this outcome is unusual" without claiming "this postal code, industry, source or task is wrong."
+For ordinary batches, an advisory is evidence for the caller to reconsider or confirm its plan and does not change execution. v0.4.4 adds one bounded exception for very large runs: with at least 1,000 pending URLs, the first 10 real batch rows form a strategy preflight. If that sample crosses the existing `LOW_BATCH_YIELD` or `HIGH_AGENT_ESCALATION` thresholds, the host runner returns `STRATEGY_REVIEW_REQUIRED` before touching the rest. The caller can explicitly confirm and continue; there is no fixed maximum batch size. This preserves the universal-tool boundary while preventing hours of obviously low-yield work.
 
 ## 10. Invariants
 

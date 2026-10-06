@@ -13,6 +13,9 @@ ADVISORY_MIN_ROWS = 10
 ADVISORY_LOW_YIELD_MAX = 0.10
 ADVISORY_HIGH_AGENT_MIN = 0.80
 ADVISORY_MAX_FIELDS = 5
+BATCH_PREFLIGHT_MIN_TOTAL = 1000
+BATCH_PREFLIGHT_SAMPLE = 10
+PREFLIGHT_REVIEW_CODES = {"LOW_BATCH_YIELD", "HIGH_AGENT_ESCALATION"}
 
 
 def _json(value: str):
@@ -195,10 +198,23 @@ def _expand_source(args: argparse.Namespace, tool: DragonFruitMe) -> int:
 
 
 def _batch_extract(args: argparse.Namespace, tool: DragonFruitMe) -> int:
-    """Process an explicit URL set without turning the agent into a loop/merge engine."""
+    """Process explicit URL sets with an early strategy check for very large runs."""
     urls = _read_urls(args.urls_file)
     output_path = Path(args.output).expanduser() if args.output else None
     done = _resume_urls(output_path) if (args.resume and output_path is not None) else set()
+    pending_total = sum(1 for url in urls if url not in done)
+    preflight_enabled = pending_total >= BATCH_PREFLIGHT_MIN_TOTAL
+    preflight_sample = min(BATCH_PREFLIGHT_SAMPLE, pending_total) if preflight_enabled else 0
+    preflight: dict | None = (
+        {
+            "enabled": True,
+            "pending_urls": pending_total,
+            "sample_size": preflight_sample,
+            "status": "RUNNING",
+        }
+        if preflight_enabled
+        else None
+    )
 
     if output_path is not None:
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -228,11 +244,15 @@ def _batch_extract(args: argparse.Namespace, tool: DragonFruitMe) -> int:
         "field_outcomes": {},
     }
 
+    review_required = False
+    review_advisories: list[dict] = []
+
     try:
         for url in urls:
             if url in done:
                 counts["skipped"] += 1
                 continue
+
             counts["attempted"] += 1
             result = tool.extract(
                 fields=args.fields_json,
@@ -249,40 +269,74 @@ def _batch_extract(args: argparse.Namespace, tool: DragonFruitMe) -> int:
                 error = result.get("error") or {}
                 code = str(error.get("code") or "UNKNOWN_ERROR")
                 counts["error_codes"][code] = counts["error_codes"].get(code, 0) + 1
-                continue
-            status = str(result.get("status", "")).lower()
-            if status in {"complete", "partial", "incomplete"}:
-                counts[status] += 1
             else:
-                counts["errors"] += 1
-            fields = result.get("fields") or []
-            counts["unconfirmed_fields"] += sum(1 for f in fields if f.get("status") == "UNCONFIRMED")
-            if any(f.get("signals") for f in fields):
-                counts["flagged_rows"] += 1
-            for field in fields:
-                field_status = str(field.get("status") or "UNKNOWN")
-                counts["field_statuses"][field_status] = counts["field_statuses"].get(field_status, 0) + 1
-                field_name = str(field.get("name") or "UNKNOWN")
-                field_bucket = counts["field_outcomes"].setdefault(field_name, {})
-                field_bucket[field_status] = field_bucket.get(field_status, 0) + 1
-                stage = field.get("stage")
-                if stage:
-                    stage = str(stage)
-                    counts["stage_hits"][stage] = counts["stage_hits"].get(stage, 0) + 1
-                for signal in field.get("signals") or []:
-                    code = str(signal.get("code") or "UNKNOWN_SIGNAL")
-                    counts["signals"][code] = counts["signals"].get(code, 0) + 1
+                status = str(result.get("status", "")).lower()
+                if status in {"complete", "partial", "incomplete"}:
+                    counts[status] += 1
+                else:
+                    counts["errors"] += 1
+                fields = result.get("fields") or []
+                counts["unconfirmed_fields"] += sum(1 for field in fields if field.get("status") == "UNCONFIRMED")
+                if any(field.get("signals") for field in fields):
+                    counts["flagged_rows"] += 1
+                for field in fields:
+                    field_status = str(field.get("status") or "UNKNOWN")
+                    counts["field_statuses"][field_status] = counts["field_statuses"].get(field_status, 0) + 1
+                    field_name = str(field.get("name") or "UNKNOWN")
+                    field_bucket = counts["field_outcomes"].setdefault(field_name, {})
+                    field_bucket[field_status] = field_bucket.get(field_status, 0) + 1
+                    stage = field.get("stage")
+                    if stage:
+                        stage = str(stage)
+                        counts["stage_hits"][stage] = counts["stage_hits"].get(stage, 0) + 1
+                    for signal in field.get("signals") or []:
+                        code = str(signal.get("code") or "UNKNOWN_SIGNAL")
+                        counts["signals"][code] = counts["signals"].get(code, 0) + 1
+
+            if preflight_enabled and counts["attempted"] == preflight_sample:
+                sample_advisories = _batch_advisories(counts)
+                review_advisories = [
+                    advisory for advisory in sample_advisories
+                    if advisory.get("code") in PREFLIGHT_REVIEW_CODES
+                ]
+                review_required = bool(review_advisories)
+                assert preflight is not None
+                preflight.update({
+                    "status": "REVIEW_REQUIRED" if review_required else "PASS",
+                    "attempted": counts["attempted"],
+                    "advisories": review_advisories,
+                })
+                if review_required and not args.continue_on_preflight_warning:
+                    counts["advisories"] = sample_advisories
+                    summary = {
+                        "ok": False,
+                        "code": "STRATEGY_REVIEW_REQUIRED",
+                        "message": (
+                            "The early sample is strongly anomalous. Confirm the source/field strategy "
+                            "before spending the remaining batch budget, or rerun with "
+                            "--continue-on-preflight-warning after review."
+                        ),
+                        "preflight": preflight,
+                        "batch": counts,
+                    }
+                    sys.stderr.write(json.dumps(summary, ensure_ascii=False, separators=(",", ":")) + "\n")
+                    return 3
     finally:
         if close_stream:
             stream.close()
 
     counts["advisories"] = _batch_advisories(counts)
+    if preflight is not None and preflight["status"] == "RUNNING":
+        preflight["status"] = "PASS"
+        preflight["attempted"] = counts["attempted"]
+        preflight["advisories"] = []
     summary = {"ok": True, "batch": counts}
+    if preflight is not None:
+        summary["preflight"] = preflight
     sys.stderr.write(json.dumps(summary, ensure_ascii=False, separators=(",", ":")) + "\n")
     if args.fail_on_error and counts["errors"]:
         return 2
     return 0
-
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="dragonfruitme", description="Escalating web-to-graph extraction for AI agents")
@@ -326,6 +380,14 @@ def main(argv: list[str] | None = None) -> None:
     p_batch.add_argument("--no-learn", action="store_true")
     p_batch.add_argument("--fail-on-error", action="store_true",
                          help="exit 2 if any URL failed; default is progress-preserving exit 0")
+    p_batch.add_argument(
+        "--continue-on-preflight-warning",
+        action="store_true",
+        help=(
+            "continue a very large batch even when its early sample triggers a strategy-review warning; "
+            "use only after the caller has reviewed the preflight evidence"
+        ),
+    )
 
     p_expand = sub.add_parser(
         "expand-source",

@@ -32,10 +32,14 @@ def expand_source(
     """
     queue: deque[tuple[str, int]] = deque()
     queued: set[str] = set()
+    limited_by: str | None = None
     for raw in seed_urls:
         url = str(raw).strip()
         if not url or url in queued:
             continue
+        if len(queue) >= max_pages:
+            limited_by = "max_pages"
+            break
         queued.add(url)
         queue.append((url, 0))
 
@@ -44,10 +48,13 @@ def expand_source(
     detail_seen: set[str] = set()
     errors: list[dict[str, Any]] = []
     source_pages: list[dict[str, Any]] = []
-    limited_by: str | None = None
 
     def enqueue(url: str | None, depth: int) -> bool:
+        nonlocal limited_by
         if not url or url in fetched or url in queued:
+            return False
+        if len(fetched) + len(queue) >= max_pages:
+            limited_by = limited_by or "max_pages"
             return False
         queued.add(url)
         queue.append((url, depth))
@@ -116,7 +123,10 @@ def expand_source(
         template = pagination.get("template")
         last_page = pagination.get("last_page")
         if template and last_page is not None and "{page}" in template:
-            for page in range(1, int(last_page) + 1):
+            terminal = int(last_page)
+            if terminal > max_pages:
+                limited_by = limited_by or "max_pages"
+            for page in range(1, min(terminal, max_pages) + 1):
                 enqueue(_format_page(template, page), depth)
         else:
             enqueue(pagination.get("next_url"), depth)

@@ -12,7 +12,7 @@
 <p align="center">
   <img alt="License" src="https://img.shields.io/badge/license-GPL--3.0-blue">
   <img alt="Status" src="https://img.shields.io/badge/status-experimental-orange">
-  <img alt="Version" src="https://img.shields.io/badge/version-0.4.3-ff2d8a">
+  <img alt="Version" src="https://img.shields.io/badge/version-0.4.4-ff2d8a">
   <img alt="Python" src="https://img.shields.io/badge/python-%3E%3D3.10-3776AB">
   <img alt="Dependencies" src="https://img.shields.io/badge/runtime%20deps-none-brightgreen">
   <img alt="MCP" src="https://img.shields.io/badge/MCP-optional-5b5bd6">
@@ -93,7 +93,7 @@ The coverage rule is intentionally fail-closed:
 
 `coverage_status` is therefore `INCOMPLETE` when pagination or lower-level candidates are visible, otherwise `UNKNOWN`. `claim_complete` remains false.
 
-For high-volume enumeration, the host no longer has to send those sampled links back through the agent one by one. The host-side `expand-source` path exhausts detected pagination and repeated child/detail link scopes under explicit page/URL/depth budgets, materializing a de-duplicated detail-URL queue before extraction. The agent-facing traversal view remains bounded; the host-side frontier retains the complete visible URL set.
+For high-volume enumeration, the host no longer has to send those sampled links back through the agent one by one. The host-side `expand-source` path exhausts detected pagination and repeated child/detail link scopes under explicit page/URL/depth budgets, materializing a de-duplicated detail-URL queue before extraction. The agent-facing traversal view remains bounded; the host-side frontier retains the complete visible URL set. Scheduling itself is budget-bounded: even a bogus terminal-page claim cannot enqueue more listing pages than `max_pages`.
 
 **Compile once.** When stage 2–5 finds a field, DragonFruitMe derives the cheapest stable recipe and stores it per *scope* (host + URL template, e.g. `example.de/expose/*`):
 
@@ -142,9 +142,9 @@ An agent can never raise the provenance of its own claim; only independent stage
 
 ---
 
-## What DragonFruitMe v0.4.3 can do today
+## What DragonFruitMe v0.4.4 can do today
 
-| Capability | v0.4.3 behavior |
+| Capability | v0.4.4 behavior |
 |---|---|
 | Fetch ladder | Inline HTML → stdlib HTTP (gzip/deflate, charset detection) → optional Playwright rendering. |
 | Polite by default | Honest User-Agent, robots.txt honoured, per-host minimum interval, response size cap, page cache (observe + locate + extract = one request). |
@@ -221,7 +221,7 @@ dragonfruitme extract-batch \
 
 The input is either one URL per line or a JSON array. DragonFruitMe keeps one recipe store warm across the run, writes and flushes one JSONL record after every URL, and continues after per-URL failures. On `--resume` it repairs a row torn by an interruption, skips URLs whose latest row is final (success, or a non-recoverable error such as `BLOCKED`) and retries transient failures such as `FETCH_FAILED` or HTTP 5xx. Retried URLs get a new row; consumers take the last row per URL. This is deliberately **not** a crawler frontier: DragonFruitMe processes the explicit URL set it is given and does not invent discovery strategy.
 
-**Batch sanity feedback (v0.4.2).** DragonFruitMe does not decide that a task is wrong, but it no longer stays silent when the aggregate outcome is extreme. After a meaningful sample it can emit non-blocking advisories such as `LOW_BATCH_YIELD`, `HIGH_AGENT_ESCALATION` or `SYSTEMATIC_FIELD_GAPS`. These describe observed ratios and ask the caller to confirm the strategy; they never guess domain-specific causes and never alter processing or the exit code.
+**Batch sanity feedback and preflight.** DragonFruitMe does not decide that a task is wrong. For ordinary batches, aggregate advisories remain non-blocking. When at least 1,000 URLs remain, however, the first 10 attempted URLs form an automatic strategy preflight. If that sample shows `LOW_BATCH_YIELD` or `HIGH_AGENT_ESCALATION`, the runner stops with `STRATEGY_REVIEW_REQUIRED` (exit 3) before spending the rest of the batch budget. After review, the caller can resume/confirm with `--continue-on-preflight-warning`. This is a bad-strategy guard, not a maximum batch-size limit.
 
 ### Python
 
@@ -311,7 +311,7 @@ See [`docs/donor-map.md`](docs/donor-map.md) and [`docs/research-basis.md`](docs
 
 ## Status
 
-v0.4.3 is experimental. The public agent surface (`observe → locate → extract`) remains intentionally small; `extract-batch` is a host-side throughput path for explicit URL sets. Recipe derivation, ranking and the render stage will evolve. Licensed under GPL-3.0-only.
+v0.4.4 is experimental. The public agent surface (`observe → locate → extract`) remains intentionally small; `extract-batch` is a host-side throughput path for explicit URL sets. Recipe derivation, ranking and the render stage will evolve. Licensed under GPL-3.0-only.
 
 ---
 

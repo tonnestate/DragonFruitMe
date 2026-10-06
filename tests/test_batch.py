@@ -349,3 +349,116 @@ def test_warning_advisories_do_not_change_batch_exit_code(tmp_path, monkeypatch,
         "HIGH_AGENT_ESCALATION",
         "SYSTEMATIC_FIELD_GAPS",
     }
+
+
+def test_large_bad_batch_stops_after_preflight_sample_for_strategy_review(tmp_path, monkeypatch, capsys):
+    urls = tmp_path / "urls.txt"
+    urls.write_text(
+        "".join(f"https://example.org/{i}\n" for i in range(1000)),
+        encoding="utf-8",
+    )
+    out = tmp_path / "out.jsonl"
+
+    class NoProgressTool:
+        def __init__(self):
+            self.calls = []
+
+        def extract(self, *, fields, url, render, learn):
+            self.calls.append(url)
+            return {
+                "ok": True,
+                "status": "INCOMPLETE",
+                "fields": [{"name": "phone", "status": "NEEDS_AGENT", "signals": []}],
+            }
+
+    fake = NoProgressTool()
+    monkeypatch.setattr(cli, "DragonFruitMe", lambda **kwargs: fake)
+
+    with pytest.raises(SystemExit) as exit_info:
+        cli.main([
+            "extract-batch",
+            "--urls-file", str(urls),
+            "--fields-json", '[{"name":"phone"}]',
+            "--output", str(out),
+            "--render", "never",
+        ])
+
+    assert exit_info.value.code == 3
+    assert len(fake.calls) == cli.BATCH_PREFLIGHT_SAMPLE == 10
+    assert len(out.read_text(encoding="utf-8").splitlines()) == 10
+    summary = json.loads(capsys.readouterr().err)
+    assert summary["code"] == "STRATEGY_REVIEW_REQUIRED"
+    assert summary["preflight"]["status"] == "REVIEW_REQUIRED"
+    assert {item["code"] for item in summary["preflight"]["advisories"]} == {
+        "LOW_BATCH_YIELD",
+        "HIGH_AGENT_ESCALATION",
+    }
+
+
+def test_large_good_batch_passes_preflight_and_continues(tmp_path, monkeypatch, capsys):
+    urls = tmp_path / "urls.txt"
+    urls.write_text(
+        "".join(f"https://example.org/{i}\n" for i in range(1000)),
+        encoding="utf-8",
+    )
+    out = tmp_path / "out.jsonl"
+    fake = FakeTool()
+    monkeypatch.setattr(cli, "DragonFruitMe", lambda **kwargs: fake)
+
+    with pytest.raises(SystemExit) as exit_info:
+        cli.main([
+            "extract-batch",
+            "--urls-file", str(urls),
+            "--fields-json", '[{"name":"phone"}]',
+            "--output", str(out),
+            "--render", "never",
+        ])
+
+    assert exit_info.value.code == 0
+    assert len(fake.calls) == 1000
+    summary = json.loads(capsys.readouterr().err)
+    assert summary["preflight"]["status"] == "PASS"
+    assert summary["preflight"]["attempted"] == 10
+
+
+def test_preflight_review_can_be_explicitly_confirmed_without_large_batch_limit(tmp_path, monkeypatch, capsys):
+    urls = tmp_path / "urls.txt"
+    urls.write_text(
+        "".join(f"https://example.org/{i}\n" for i in range(1000)),
+        encoding="utf-8",
+    )
+    out = tmp_path / "out.jsonl"
+
+    class NoProgressTool:
+        def __init__(self):
+            self.calls = []
+
+        def extract(self, *, fields, url, render, learn):
+            self.calls.append(url)
+            return {
+                "ok": True,
+                "status": "INCOMPLETE",
+                "fields": [{"name": "phone", "status": "NEEDS_AGENT", "signals": []}],
+            }
+
+    fake = NoProgressTool()
+    monkeypatch.setattr(cli, "DragonFruitMe", lambda **kwargs: fake)
+
+    with pytest.raises(SystemExit) as exit_info:
+        cli.main([
+            "extract-batch",
+            "--urls-file", str(urls),
+            "--fields-json", '[{"name":"phone"}]',
+            "--output", str(out),
+            "--render", "never",
+            "--continue-on-preflight-warning",
+        ])
+
+    assert exit_info.value.code == 0
+    assert len(fake.calls) == 1000
+    summary = json.loads(capsys.readouterr().err)
+    assert summary["preflight"]["status"] == "REVIEW_REQUIRED"
+    assert {item["code"] for item in summary["preflight"]["advisories"]} == {
+        "LOW_BATCH_YIELD",
+        "HIGH_AGENT_ESCALATION",
+    }

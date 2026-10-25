@@ -181,3 +181,23 @@ def test_scrapegraph_oss_uses_existing_html_and_host_config():
 def test_donor_disabled_by_default(monkeypatch):
     monkeypatch.delenv("DRAGONFRUITME_WEB_DONOR", raising=False)
     assert donor_from_env() is None
+
+
+def test_valid_but_ungrounded_donor_value_is_rejected(tmp_path):
+    donor = StubDonor({"owner": "Invented Person"})
+    html = "<html><body><p>Company without a named owner.</p></body></html>"
+    with _tool(tmp_path, html, donor) as tool:
+        result = tool.extract(
+            url="https://example.org/company/1",
+            fields=[{"name": "owner", "type": "text"}],
+            render="never",
+        )
+
+    field = result["fields"][0]
+    assert field["status"] == "NEEDS_AGENT"
+    assert any(
+        attempt["stage"] == "donor"
+        and attempt["outcome"] == "REJECTED"
+        and attempt["reason"] == "VALUE_NOT_IN_PAGE"
+        for attempt in field["attempts"]
+    )

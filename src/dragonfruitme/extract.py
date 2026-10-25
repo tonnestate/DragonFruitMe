@@ -452,19 +452,28 @@ class Extractor:
         grounded = re.search(value_regex(value), page.html, re.I) is not None or (
             fold(value) in fold(" ".join(block.text for block in page.graph.blocks))
         )
+        if not grounded:
+            attempts.append({
+                "stage": "donor",
+                "donor": donor_name,
+                "page": page.stage,
+                "outcome": "REJECTED",
+                "reason": "VALUE_NOT_IN_PAGE",
+            })
+            return None
         compiled = self._compile(
             scope,
             spec,
             page,
             value,
             f"donor:{donor_name}",
-        ) if learn and grounded else None
+        ) if learn else None
         attempts.append({
             "stage": "donor",
             "donor": donor_name,
             "page": page.stage,
             "outcome": "HIT",
-            "grounded": grounded,
+            "grounded": True,
             "recipe": compiled["kind"] if compiled else None,
         })
         found = self._found(
@@ -473,7 +482,7 @@ class Extractor:
             normalized,
             f"donor:{donor_name}",
             page,
-            {"donor": donor_name, "grounded_in_page": grounded, **evidence},
+            {"donor": donor_name, "grounded_in_page": True, **evidence},
             compiled,
             attempts,
         )

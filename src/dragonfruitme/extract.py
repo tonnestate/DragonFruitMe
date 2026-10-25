@@ -312,7 +312,7 @@ class Extractor:
             contradicted = (
                 ok
                 and recipe.kind in {"regex", "label"}
-                and recipe.origin in {"label", "structured"}
+                and (recipe.origin in {"label", "structured"} or recipe.origin.startswith("donor:"))
                 and not check[0]
                 and bool(check[1])
             )

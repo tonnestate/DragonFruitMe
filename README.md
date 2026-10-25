@@ -12,7 +12,7 @@
 <p align="center">
   <img alt="License" src="https://img.shields.io/badge/license-GPL--3.0-blue">
   <img alt="Status" src="https://img.shields.io/badge/status-experimental-orange">
-  <img alt="Version" src="https://img.shields.io/badge/version-0.4.4-ff2d8a">
+  <img alt="Version" src="https://img.shields.io/badge/version-0.5.0-ff2d8a">
   <img alt="Python" src="https://img.shields.io/badge/python-%3E%3D3.10-3776AB">
   <img alt="Dependencies" src="https://img.shields.io/badge/runtime%20deps-none-brightgreen">
   <img alt="MCP" src="https://img.shields.io/badge/MCP-optional-5b5bd6">
@@ -64,9 +64,10 @@ field "kaufpreis" (type: price)
  2 structured   JSON-LD, embedded JSON, microdata, meta / Open Graph
  3 label        visible label → value (dt/dd, th/td, "Kaufpreis: 349.000 €")
  4 render       optional headless rendering — only for JS shells or on request
- 5 agent        NEEDS_AGENT + bounded candidates → agent may *teach* a value
+ 5 donor        optional host-configured ScrapeGraph extraction on already-fetched HTML
+ 6 agent        NEEDS_AGENT + bounded candidates → agent may *teach* a value
         │
-        └── every hit in 2–5 is validated, then compiled back into stage 1
+        └── every validated grounded hit in 2–6 can compile back into stage 1
 ```
 
 Each stage must **validate** its candidate against the field type (`price`, `area`, `number`, `integer`, `date`, `email`, `phone`, `url`, `text`, plus optional `min`, `max`, `pattern`). A stage that finds something that is not a valid price does not count, and the field escalates.
@@ -142,11 +143,12 @@ An agent can never raise the provenance of its own claim; only independent stage
 
 ---
 
-## What DragonFruitMe v0.4.4 can do today
+## What DragonFruitMe v0.5.0 can do today
 
-| Capability | v0.4.4 behavior |
+| Capability | v0.5.0 behavior |
 |---|---|
-| Fetch ladder | Inline HTML → stdlib HTTP (gzip/deflate, charset detection) → optional Playwright rendering. |
+| Fetch ladder | Inline HTML → stdlib HTTP (gzip/deflate, charset detection) → optional Playwright rendering. ScrapeGraph donors never bypass this ladder; they receive only HTML already acquired under DragonFruitMe policy. |
+| Optional web donor | Host-configured ScrapeGraph OSS or ScrapeGraph managed API can process fields still unresolved after native stages. Donor candidates still pass DragonFruitMe validation, provenance and recipe-compilation rules. |
 | Polite by default | Honest User-Agent, robots.txt honoured, per-host minimum interval, response size cap, page cache (observe + locate + extract = one request). |
 | Challenge handling | CAPTCHA/bot challenges and HTTP 429 end with `BLOCKED` / `RATE_LIMITED` and a `next` hint (human-in-the-loop, official API/feed). A CAPTCHA widget inside a normal content page is *not* treated as a block. |
 | Page graph | Sections from heading hierarchy, block kinds, table rows, regions (main/nav/header/aside/footer), emphasis, links with anchor text, canonical, feeds, meta, images missing `alt`. |
@@ -168,7 +170,43 @@ An agent can never raise the provenance of its own claim; only independent stage
 | Batch extraction | Host-side `extract-batch` processes explicit URL sets with one warm recipe store, immediate JSONL persistence, de-duplication and progress-preserving per-URL failure handling. `--resume` repairs a torn last line, skips final rows and retries transient failures. The summary exposes `error_codes`, `field_statuses`, per-field `field_outcomes`, `stage_hits`, `signals` and non-blocking `advisories` for unusually low yield, excessive agent escalation or fields that are systematically never found. |
 | Source expansion | Host-side `expand-source` turns productive listing/directory seeds into a de-duplicated detail-URL queue by exhausting bounded pagination and repeated child/detail scopes under explicit host budgets. Search can then return to discovery only after the current source frontier is exhausted. |
 
-The core has **no mandatory third-party runtime dependencies**. MCP and the browser stage are optional extras.
+The core has **no mandatory third-party runtime dependencies**. MCP, browser rendering and ScrapeGraph donors are optional extras.
+
+### ScrapeGraph donor
+
+ScrapeGraph is an optional **donor**, not a replacement engine and not a new public agent operation. The escalation order is:
+
+```text
+recipe → structured → label → render → ScrapeGraph donor → NEEDS_AGENT
+```
+
+The donor is disabled by default. DragonFruitMe first acquires the page under its own robots/rate/challenge policy and passes only that already-acquired HTML to the donor. Neither built-in ScrapeGraph adapter is allowed to refetch the URL, inject cookies, select proxies, enable stealth mode or bypass a challenge. Donor output is not trusted merely because an AI returned it: every candidate is type-validated again, gets explicit provenance, and compiles into a deterministic recipe only when the value is grounded in the acquired page.
+
+Self-hosted ScrapeGraphAI:
+
+```bash
+pip install -e '.[scrapegraph-oss]'
+export DRAGONFRUITME_WEB_DONOR=scrapegraph-oss
+export DRAGONFRUITME_SCRAPEGRAPH_OSS_CONFIG_JSON='{"llm":{"model":"<host-selected-provider/model>"},"headless":true}'
+```
+
+DragonFruitMe deliberately supplies **no default model**. Configure the LLM explicitly in the host and keep provider credentials in that provider's normal environment. Depending on that LLM configuration, page content may still leave the host.
+
+Managed ScrapeGraph API (Python ≥ 3.12):
+
+```bash
+pip install -e '.[scrapegraph-api]'
+export SGAI_API_KEY='...'
+export DRAGONFRUITME_WEB_DONOR=scrapegraph-api
+```
+
+The managed adapter sends the already-fetched page HTML to ScrapeGraphAI's cloud for structured extraction; this is explicit data egress and therefore opt-in. It does not ask the cloud service to fetch or unblock the target URL.
+
+Python hosts can inspect donor readiness without making a donor request:
+
+```python
+tool.donor_status()
+```
 
 ### Repository/layout invariant
 
@@ -311,7 +349,7 @@ See [`docs/donor-map.md`](docs/donor-map.md) and [`docs/research-basis.md`](docs
 
 ## Status
 
-v0.4.4 is experimental. The public agent surface (`observe → locate → extract`) remains intentionally small; `extract-batch` is a host-side throughput path for explicit URL sets. Recipe derivation, ranking and the render stage will evolve. Licensed under GPL-3.0-only.
+v0.5.0 is experimental. The public agent surface (`observe → locate → extract`) remains intentionally small; `extract-batch` is a host-side throughput path for explicit URL sets. Recipe derivation, ranking and the render stage will evolve. Licensed under GPL-3.0-only.
 
 ---
 

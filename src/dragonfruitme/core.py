@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .binding import state_dir as resolve_state_dir
+from .donors import WebDonor, donor_from_env
 from .errors import DragonFruitMeError
 from .extract import Page, extract as extract_core, page_from
 from .fetch import Fetcher, FetchResult
@@ -40,10 +41,12 @@ class Engine:
         state_dir: str | Path | None = None,
         policy: FetchPolicy | None = None,
         fetcher: Fetcher | None = None,
+        donor: WebDonor | None = None,
     ):
         self.state_dir = Path(state_dir) if state_dir else resolve_state_dir()
         self.policy = policy or (fetcher.policy if fetcher else FetchPolicy())
         self.fetcher = fetcher or Fetcher(self.policy)
+        self.donor = donor if donor is not None else donor_from_env()
         self.store = RecipeStore(self.state_dir / "recipes.sqlite")
 
     # -- page acquisition ----------------------------------------------------
@@ -90,12 +93,18 @@ class Engine:
             def render_page() -> Page:
                 # Raises RENDER_NOT_AVAILABLE without the browser extra; recorded as an attempt.
                 return page_from(self.fetcher.render(url))
+        donor_extract = None
+        if url and self.donor is not None:
+            def donor_extract(specs: list[dict[str, Any]], page: Page) -> dict[str, Any]:
+                return self.donor.extract(url=url, fields=specs, html=page.html)
+
         return extract_core(
             store=self.store,
             scope=resolved_scope,
             fields=fields,
             first_page=first,
             render_page=render_page,
+            donor_extract=donor_extract,
             render=render,
             learn=learn,
         )
@@ -112,6 +121,11 @@ class Engine:
             max_depth=max_depth,
         )
 
+    def donor_status(self) -> dict[str, Any]:
+        if self.donor is None:
+            return {"ok": True, "configured": False, "donor": None}
+        return {"ok": True, "configured": True, "donor": self.donor.status()}
+
     def recipes(self, scope: str | None = None) -> dict[str, Any]:
         return {"ok": True, "recipes": [r.as_dict() for r in self.store.list(scope)]}
 
@@ -126,8 +140,8 @@ class DragonFruitMe:
     """Three-operation web interface for agents: observe → locate → extract."""
 
     def __init__(self, state_dir: str | Path | None = None, policy: FetchPolicy | None = None,
-                 fetcher: Fetcher | None = None):
-        self.engine = Engine(state_dir=state_dir, policy=policy, fetcher=fetcher)
+                 fetcher: Fetcher | None = None, donor: WebDonor | None = None):
+        self.engine = Engine(state_dir=state_dir, policy=policy, fetcher=fetcher, donor=donor)
 
     def observe(self, **kwargs: Any) -> dict[str, Any]:
         return safe_call(self.engine.observe, **kwargs)
@@ -140,6 +154,9 @@ class DragonFruitMe:
 
     def expand_source(self, **kwargs: Any) -> dict[str, Any]:
         return safe_call(self.engine.expand_source, **kwargs)
+
+    def donor_status(self) -> dict[str, Any]:
+        return safe_call(self.engine.donor_status)
 
     def recipes(self, **kwargs: Any) -> dict[str, Any]:
         return safe_call(self.engine.recipes, **kwargs)

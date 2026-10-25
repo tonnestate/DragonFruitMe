@@ -24,10 +24,10 @@ mcp = MCPServer(
         "observe returns a bounded page-graph overview plus traversal evidence: pagination, candidate child/detail "
         "levels and conservative coverage status. A single page never proves source completeness. locate returns the most relevant blocks for a query, "
         "ranked by on-page signals. extract escalates per field: stored recipe -> structured data -> label "
-        "heuristics -> optional rendering -> NEEDS_AGENT with bounded candidates. If a field comes back "
+        "heuristics -> optional rendering -> optional host-configured donor -> NEEDS_AGENT with bounded candidates. If a field comes back "
         "NEEDS_AGENT and you can read the value in the candidates, call extract again with that field's "
         "'teach' set to the exact value; it is accepted only if it is grounded in the page, and it is "
-        "compiled into a recipe. Every found value carries a provenance (AGENT_TAUGHT < ENGINE_OBSERVED < "
+        "compiled into a recipe. Every found value carries a provenance (AGENT_TAUGHT < DONOR_OBSERVED < ENGINE_OBSERVED < "
         "CROSS_CONFIRMED) and signals; set min_provenance on fields that matter. BLOCKED and ROBOTS_DISALLOWED are final: DragonFruitMe never bypasses "
         "CAPTCHAs, bot challenges or robots.txt - use an official API/feed or ask a human."
     ),

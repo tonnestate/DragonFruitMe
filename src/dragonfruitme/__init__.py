@@ -1,6 +1,6 @@
 """DragonFruitMe - escalating web-to-graph extraction interface for AI agents."""
 
-__version__ = "0.4.4"
+__version__ = "0.5.0"
 
 from .core import DragonFruitMe  # noqa: E402
 

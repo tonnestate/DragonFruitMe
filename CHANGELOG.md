@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.5.0 — 2026-10-25
+
+ScrapeGraphAI becomes an optional DragonFruitMe extraction donor without changing the public agent surface or weakening fetch policy.
+
+- add a generic host-owned `WebDonor` boundary plus self-hosted `scrapegraphai` and managed `scrapegraph-py` adapters;
+- donors are disabled by default and run only after recipe/structured/label/render stages leave fields unresolved;
+- both adapters receive only HTML already acquired by DragonFruitMe; they never refetch the target URL, inject cookies, select proxies, enable stealth or bypass robots/challenges;
+- one donor call handles all unresolved fields on a page and every returned value is revalidated by DragonFruitMe;
+- add provenance `DONOR_OBSERVED` between `AGENT_TAUGHT` and `ENGINE_OBSERVED`; native stage confirmation can raise it;
+- donor values compile into stage-1 recipes only when grounded in the acquired page, and donor-derived recipes remain subject to contradiction checks;
+- add `DragonFruitMe.donor_status()` for secret-free readiness inspection;
+- add optional install extras `scrapegraph-oss` and `scrapegraph-api` (managed SDK requires Python >= 3.12);
+- regression tests cover escalation ordering, invalid donor rejection, one-call multi-field extraction, native-stage precedence and HTML-only handoff to both ScrapeGraph adapters.
+
+
 ## 0.4.4 — 2026-10-06
 
 Large-run hardening: detect a bad strategy before spending hours on it, and bound source-frontier scheduling before malformed pagination can consume memory.

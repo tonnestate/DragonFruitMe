@@ -1,9 +1,9 @@
 """The escalation graph: per-field extraction from cheapest to most expensive.
 
-    recipe ──miss──▶ structured ──miss──▶ label ──miss──▶ render ──miss──▶ agent
-      ▲                  │                  │               │
-      └──── compile ◀────┴──────────────────┴───────────────┘
-                         (and agent-taught values)
+    recipe ──miss──▶ structured ──miss──▶ label ──miss──▶ render ──miss──▶ donor ──miss──▶ agent
+      ▲                  │                  │               │               │
+      └──── compile ◀────┴──────────────────┴───────────────┴───────────────┘
+                         (and grounded agent/donor values)
 
 Every stage validates its candidate against the field type before it counts.
 A hit in a costly stage is compiled into a recipe so the next page of the same
@@ -30,7 +30,7 @@ RENDER_MODES = {"auto", "on_miss", "never"}
 
 # Who stands behind a value (lowest to highest). An agent can never raise the
 # provenance of its own claim: only independent engine stages can.
-PROVENANCE = ("AGENT_TAUGHT", "ENGINE_OBSERVED", "CROSS_CONFIRMED")
+PROVENANCE = ("AGENT_TAUGHT", "DONOR_OBSERVED", "ENGINE_OBSERVED", "CROSS_CONFIRMED")
 # The same unconfirmed value on this many different URLs of one scope is a
 # signal that a recipe is anchored on something page-independent (a sidebar,
 # a teaser, a default) - activity that is not progress.
@@ -247,7 +247,11 @@ def provenance_of(origin: str, confirmed: list[str]) -> str:
         return "CROSS_CONFIRMED"
     if confirmed:
         return "ENGINE_OBSERVED"
-    return "AGENT_TAUGHT" if origin == "taught" else "ENGINE_OBSERVED"
+    if origin == "taught":
+        return "AGENT_TAUGHT"
+    if origin.startswith("donor"):
+        return "DONOR_OBSERVED"
+    return "ENGINE_OBSERVED"
 
 
 # -- the graph ----------------------------------------------------------------
@@ -308,7 +312,7 @@ class Extractor:
             contradicted = (
                 ok
                 and recipe.kind in {"regex", "label"}
-                and recipe.origin in {"label", "structured"}
+                and (recipe.origin in {"label", "structured"} or recipe.origin.startswith("donor:"))
                 and not check[0]
                 and bool(check[1])
             )
@@ -430,6 +434,60 @@ class Extractor:
                             {"grounded_in": "structured" if json_path else "html"}, compiled, attempts)
         return self._assess(scope, spec, page, found, "taught")
 
+    def accept_donor(self, scope: str, spec: dict[str, Any], page: Page, raw: Any,
+                     donor_name: str, evidence: dict[str, Any], attempts: list[dict[str, Any]],
+                     learn: bool) -> dict[str, Any] | None:
+        """Validate a donor candidate and compile it only when grounded in the acquired page."""
+        ok, normalized, reason = validate(raw, spec, typed_source=True)
+        if not ok:
+            attempts.append({
+                "stage": "donor",
+                "donor": donor_name,
+                "page": page.stage,
+                "outcome": "REJECTED",
+                "reason": reason,
+            })
+            return None
+        value = normalize_text(raw)
+        grounded = re.search(value_regex(value), page.html, re.I) is not None or (
+            fold(value) in fold(" ".join(block.text for block in page.graph.blocks))
+        )
+        if not grounded:
+            attempts.append({
+                "stage": "donor",
+                "donor": donor_name,
+                "page": page.stage,
+                "outcome": "REJECTED",
+                "reason": "VALUE_NOT_IN_PAGE",
+            })
+            return None
+        compiled = self._compile(
+            scope,
+            spec,
+            page,
+            value,
+            f"donor:{donor_name}",
+        ) if learn else None
+        attempts.append({
+            "stage": "donor",
+            "donor": donor_name,
+            "page": page.stage,
+            "outcome": "HIT",
+            "grounded": True,
+            "recipe": compiled["kind"] if compiled else None,
+        })
+        found = self._found(
+            spec,
+            value,
+            normalized,
+            f"donor:{donor_name}",
+            page,
+            {"donor": donor_name, "grounded_in_page": True, **evidence},
+            compiled,
+            attempts,
+        )
+        return self._assess(scope, spec, page, found, f"donor:{donor_name}")
+
     def _assess(self, scope: str, spec: dict[str, Any], page: Page, found: dict[str, Any], origin: str,
                 check: tuple[list[str], list[dict[str, Any]]] | None = None) -> dict[str, Any]:
         """Attach provenance and signals; enforce ``min_provenance``."""
@@ -484,6 +542,7 @@ def extract(
     fields: list[Any],
     first_page: Page,
     render_page: Callable[[], Page] | None,
+    donor_extract: Callable[[list[dict[str, Any]], Page], dict[str, Any]] | None = None,
     render: str = "auto",
     learn: bool = True,
     max_candidates: int = 3,
@@ -540,6 +599,55 @@ def extract(
         render_note = {"outcome": "SKIP", "reason": "RENDER_NEVER"}
 
     last_page = pages[-1]
+    unresolved = [spec for spec in specs if spec["name"] not in results]
+    if unresolved and donor_extract is not None:
+        try:
+            donation = donor_extract(unresolved, last_page)
+        except DragonFruitMeError as exc:
+            for spec in unresolved:
+                attempts[spec["name"]].append({
+                    "stage": "donor",
+                    "outcome": "FAILED",
+                    "reason": exc.code,
+                })
+        except Exception as exc:
+            for spec in unresolved:
+                attempts[spec["name"]].append({
+                    "stage": "donor",
+                    "outcome": "FAILED",
+                    "reason": "UNEXPECTED_DONOR_ERROR",
+                    "type": type(exc).__name__,
+                })
+        else:
+            donor_name = str(donation.get("donor") or "unknown")
+            values = donation.get("values") if isinstance(donation.get("values"), dict) else {}
+            donor_evidence = donation.get("evidence") if isinstance(donation.get("evidence"), dict) else {}
+            with store.transaction():
+                for spec in unresolved:
+                    name = spec["name"]
+                    raw = values.get(name)
+                    if raw in (None, ""):
+                        attempts[name].append({
+                            "stage": "donor",
+                            "donor": donor_name,
+                            "page": last_page.stage,
+                            "outcome": "MISS",
+                            "reason": "NO_VALUE",
+                        })
+                        continue
+                    found = extractor.accept_donor(
+                        scope,
+                        spec,
+                        last_page,
+                        raw,
+                        donor_name,
+                        donor_evidence,
+                        attempts[name],
+                        learn,
+                    )
+                    if found is not None:
+                        results[name] = found
+
     for spec in specs:
         name = spec["name"]
         if name in results:

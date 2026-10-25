@@ -1,6 +1,6 @@
-# Architecture and Specification (v0.4.4)
+# Architecture and Specification (v0.5.0)
 
-DragonFruitMe has one job: give an AI agent precise, cheap and provable access to the content of web pages. It is built from three graphs and a recipe store. This specification reflects the v0.4.4 system, including traversal coverage evidence, the bounded recipe portfolio, promotion/demotion lifecycle, constant-time live-recipe dispatch and non-blocking batch sanity feedback.
+DragonFruitMe has one job: give an AI agent precise, cheap and provable access to the content of web pages. It is built from three graphs and a recipe store. This specification reflects the v0.5.0 system, including traversal coverage evidence, the bounded recipe portfolio, promotion/demotion lifecycle, constant-time live-recipe dispatch and non-blocking batch sanity feedback.
 
 ```text
                  ┌──────────── host-bound ────────────┐
@@ -92,9 +92,10 @@ Per field, in this order. A stage only counts when its candidate passes `validat
 | 2 | `structured` | JSON-LD / embedded JSON / microdata / meta, by explicit `paths` first, then by alias = last key | compile `json` recipe |
 | 3 | `label` | exact label blocks (dt→dd, th→td same row, label→next block) first; then bounded structural sibling-wrapper neighbours inside the same component; then inline `Label: value`; main region first | compile `regex` (label-anchored) or `label` recipe |
 | 4 | `render` | re-run 1–3 on the rendered page | as above |
-| 5 | `agent` | — | `NEEDS_AGENT` with ≤3 ranked candidates |
+| 5 | `donor` | optional host-configured ScrapeGraph OSS/API over the already-acquired HTML | type-validate; record `DONOR_OBSERVED`; compile only when grounded in the page |
+| 6 | `agent` | — | `NEEDS_AGENT` with ≤3 ranked candidates |
 
-**Defining backward edge (public since 2026-10-04):** the escalation graph is not only the forward sequence `1 → 2 → 3 → 4 → 5`. A validated hit from stages 2–5 is compiled back into stage 1 for the same scope and field. That backward compilation edge is what turns escalation into learning: expensive resolution is paid once, then reused deterministically. In v0.4.x the compiled result joins the bounded recipe portfolio instead of blindly overwriting a proven primary.
+**Defining backward edge (public since 2026-10-04):** the escalation graph is not only the forward sequence `1 → 2 → 3 → 4 → 5 → 6`. A validated, grounded hit from stages 2–6 is eligible to compile back into stage 1 for the same scope and field. That backward compilation edge is what turns escalation into learning: expensive resolution is paid once, then reused deterministically. In v0.4.x the compiled result joins the bounded recipe portfolio instead of blindly overwriting a proven primary.
 
 **Structural label fallback:** modern component layouts often place a short label and its value in sibling `div` wrappers with icon/help nodes between them. DragonFruitMe keeps the normal adjacent rule first, then inspects at most eight following blocks. A candidate must remain in the same section and region and share the label's immediate component ancestry; typed validation still decides whether it can count. This is deterministic neighbourhood reasoning, not CSS/XPath execution.
 
@@ -121,7 +122,7 @@ After a stage finds a value, the structured and label stages are asked **indepen
 * `confirmed_by` = engine stages with at least one valid candidate equal to the value;
 * a stage *disagrees* when it has a valid answer of its own and none of its candidates equals the value.
 
-**Provenance** (lowest to highest): `AGENT_TAUGHT` (origin taught, no engine confirmation) < `ENGINE_OBSERVED` (one engine stage confirms, or an engine-derived recipe hit without contradiction) < `CROSS_CONFIRMED` (structured and label both confirm). An agent cannot raise the provenance of its own claim. `min_provenance` turns lower values into `UNCONFIRMED` (value shown, not counted as found).
+**Provenance** (lowest to highest): `AGENT_TAUGHT` (origin taught, no engine confirmation) < `DONOR_OBSERVED` (optional donor produced a type-valid value with no native confirmation) < `ENGINE_OBSERVED` (one engine stage confirms, or an engine-derived recipe hit without contradiction) < `CROSS_CONFIRMED` (structured and label both confirm). An agent cannot raise the provenance of its own claim. `min_provenance` turns lower values into `UNCONFIRMED` (value shown, not counted as found).
 
 **Contradiction:** a `regex`/`label` recipe derived from the label or structured stage is discarded when nothing confirms it and an independent stage disagrees. The attempt is recorded as `MISS` with reason `CONTRADICTED`, `recipe_value` and `contradicted_by`; the field escalates and the recipe is relearned. Disagreement that does not discard a hit is reported as a `STAGE_DISAGREEMENT` signal.
 
@@ -145,8 +146,9 @@ For ordinary batches, an advisory is evidence for the caller to reconsider or co
 4. A recipe hit that an independent stage contradicts is never returned as found.
 5. Blocks, robots disallows and rate limits are final for the call.
 6. The agent can neither choose the filesystem location of the recipe store nor relax the fetch policy.
-7. The core imports only the Python standard library.
-8. One observed page never authorizes a whole-source completeness claim; visible pagination or repeated child scopes remain explicit traversal evidence.
+7. The mandatory core imports only the Python standard library. Optional donor packages are imported lazily only when explicitly configured.
+8. Donors never receive authority to fetch around DragonFruitMe policy; the built-in ScrapeGraph adapters process already-acquired HTML only.
+9. One observed page never authorizes a whole-source completeness claim; visible pagination or repeated child scopes remain explicit traversal evidence.
 
 ## 11. Deferred
 

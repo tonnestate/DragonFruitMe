@@ -184,12 +184,12 @@ def test_donor_disabled_by_default(monkeypatch):
 
 
 def test_valid_but_ungrounded_donor_value_is_rejected(tmp_path):
-    donor = StubDonor({"owner": "Invented Person"})
-    html = "<html><body><p>Company without a named owner.</p></body></html>"
+    donor = StubDonor({"founder": "Invented Person"})
+    html = "<html><body><p>Generic company record with no leadership information.</p></body></html>"
     with _tool(tmp_path, html, donor) as tool:
         result = tool.extract(
             url="https://example.org/company/1",
-            fields=[{"name": "owner", "type": "text"}],
+            fields=[{"name": "founder", "type": "text"}],
             render="never",
         )
 
